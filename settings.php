@@ -373,6 +373,17 @@ if ($ADMIN->fulltree) {
     );
     $settings->add($offeralternativehosts);
 
+    // Auto-add course instructors as alternative hosts.
+    $autoaddinstructors = new admin_setting_configcheckbox(
+        'zoomyt/autoaddinstructorsashosts',
+        get_string('autoaddinstructorsashosts', 'mod_zoomyt'),
+        get_string('autoaddinstructorsashosts_desc', 'mod_zoomyt'),
+        1,
+        1,
+        0
+    );
+    $settings->add($autoaddinstructors);
+
     $capacitywarningchoices = [
         ZOOM_CAPACITYWARNING_DISABLE => get_string('meetingcapacitywarning_disable', 'mod_zoomyt'),
         ZOOM_CAPACITYWARNING_ENABLE => get_string('meetingcapacitywarning_enable', 'mod_zoomyt'),

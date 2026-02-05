@@ -48,6 +48,8 @@ $string['alternative_hosts_picker'] = 'Show alternative hosts option as user pic
 $string['alternative_hosts_picker_help'] = "The alternative host option allows you to schedule meetings and designate other Zoom user(s) enrolled in this course to start the meeting as well. These users will receive an email from Zoom notifying them that they've been added as an alternative host, with a link to start the meeting.\n\nYou can pick one or multiple alternative hosts based on your meeting needs.\n\nIf you can't find a particular user in this user picker, this user either is not enrolled into this course with an appropriate role or does not have an eligible account on Zoom.";
 $string['alternative_hosts_picker_noneselected'] = 'No alternative host selected';
 $string['alternative_hosts_picker_placeholder'] = 'Select user(s)';
+$string['autoaddinstructorsashosts'] = 'Auto-add course instructors as alternative hosts';
+$string['autoaddinstructorsashosts_desc'] = 'When enabled, all course instructors (users with capability to add Zoom activities) will be automatically added as alternative hosts when a Zoom meeting is created or updated. This ensures that any instructor in the course can start and host meetings, regardless of who originally created the activity.';
 $string['apiendpoint'] = 'Zoom API Endpoint';
 $string['apiendpoint_desc'] = 'Choose which Zoom API endpoint the Zoom activity will use to connect. The global API endpoint should work for all users. The European Union (EU) API endpoint is only intended for users who have a Zoom license with the EU provisioning option. If you are unsure, use the global API endpoint.';
 $string['apiendpoint_eu'] = 'EU API Endpoint';
@@ -611,6 +613,7 @@ $string['download_failed'] = 'Download failed: {$a}';
 
 // Scheduled tasks.
 $string['task_sync_recordings_youtube'] = 'Sync Zoom recordings to YouTube';
+$string['task_sync_alternative_hosts'] = 'Sync course instructors as alternative hosts';
 
 // Events.
 $string['event_video_uploaded'] = 'Video uploaded to YouTube';

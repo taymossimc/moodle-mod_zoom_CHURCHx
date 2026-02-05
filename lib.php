@@ -100,6 +100,28 @@ function zoomyt_add_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = null)
         $zoom->breakoutrooms = $breakoutrooms['zoomyt'];
     }
 
+    // Auto-add course instructors as alternative hosts if enabled.
+    $config = get_config('zoomyt');
+    if (!empty($config->autoaddinstructorsashosts)) {
+        // Get all instructor emails from the course.
+        $instructoremails = zoomyt_get_course_instructor_emails($zoom->course);
+
+        // Get the host email to exclude (can't be alternative host of their own meeting).
+        $hostemail = null;
+        if (!empty($zoom->schedule_for)) {
+            $hostemail = $zoom->schedule_for;
+        } else {
+            global $USER;
+            $hostemail = zoomyt_get_api_identifier($USER);
+        }
+
+        // Merge with any existing alternative hosts.
+        $existinghosts = $zoom->alternative_hosts ?? '';
+        $zoom->alternative_hosts = zoomyt_merge_alternative_hosts($existinghosts, $instructoremails, $hostemail);
+
+        debugging("ZOOMYT: Auto-added instructors as alternative hosts: {$zoom->alternative_hosts}", DEBUG_DEVELOPER);
+    }
+
     $response = zoomyt_webservice()->create_meeting($zoom, $zoom->coursemodule);
     $zoom = populate_zoomyt_from_response($zoom, $response);
     $zoom->timemodified = time();
@@ -199,6 +221,38 @@ function zoomyt_update_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = nu
     $updatedzoomrecord = $DB->get_record('zoomyt', ['id' => $zoom->id]);
     $zoom->meeting_id = $updatedzoomrecord->meeting_id;
     $zoom->webinar = $updatedzoomrecord->webinar;
+
+    // Auto-add course instructors as alternative hosts if enabled.
+    $config = get_config('zoomyt');
+    if (!empty($config->autoaddinstructorsashosts)) {
+        // Get all instructor emails from the course.
+        $instructoremails = zoomyt_get_course_instructor_emails($zoom->course);
+
+        // Get the host email to exclude (can't be alternative host of their own meeting).
+        $hostemail = null;
+        if (!empty($zoom->schedule_for)) {
+            $hostemail = $zoom->schedule_for;
+        } else {
+            // Try to get the original host email.
+            if (!empty($updatedzoomrecord->host_id)) {
+                try {
+                    $hostuser = zoomyt_get_user($updatedzoomrecord->host_id);
+                    $hostemail = $hostuser->email ?? null;
+                } catch (moodle_exception $e) {
+                    // Ignore if we can't get the host user.
+                }
+            }
+        }
+
+        // Merge with any existing alternative hosts.
+        $existinghosts = $zoom->alternative_hosts ?? $updatedzoomrecord->alternative_hosts ?? '';
+        $zoom->alternative_hosts = zoomyt_merge_alternative_hosts($existinghosts, $instructoremails, $hostemail);
+
+        // Save the updated alternative hosts to the database so it appears in the form.
+        $DB->set_field('zoomyt', 'alternative_hosts', $zoom->alternative_hosts, ['id' => $zoom->id]);
+
+        debugging("ZOOMYT: Auto-updated instructors as alternative hosts: {$zoom->alternative_hosts}", DEBUG_DEVELOPER);
+    }
 
     // Update meeting on Zoom.
     try {

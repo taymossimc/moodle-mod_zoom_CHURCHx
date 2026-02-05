@@ -48,6 +48,8 @@ $string['alternative_hosts_picker'] = 'Mostrar opción de anfitriones alternativ
 $string['alternative_hosts_picker_help'] = "La opción de anfitrión alternativo le permite programar reuniones y designar a otros usuarios de Zoom inscritos en este curso para iniciar la reunión.";
 $string['alternative_hosts_picker_noneselected'] = 'Ningún anfitrión alternativo seleccionado';
 $string['alternative_hosts_picker_placeholder'] = 'Seleccionar usuario(s)';
+$string['autoaddinstructorsashosts'] = 'Agregar automáticamente instructores del curso como anfitriones alternativos';
+$string['autoaddinstructorsashosts_desc'] = 'Cuando está habilitado, todos los instructores del curso (usuarios con capacidad para agregar actividades de Zoom) serán agregados automáticamente como anfitriones alternativos cuando se crea o actualiza una reunión de Zoom. Esto asegura que cualquier instructor del curso pueda iniciar y dirigir reuniones, independientemente de quién creó la actividad originalmente.';
 $string['apiendpoint'] = 'Punto de acceso API de Zoom';
 $string['apiendpoint_desc'] = 'Elija qué punto de acceso API de Zoom utilizará la actividad Zoom para conectarse.';
 $string['apiendpoint_eu'] = 'Punto de acceso API UE';
@@ -529,6 +531,7 @@ $string['download_failed'] = 'Error en la descarga: {$a}';
 
 // Tareas programadas.
 $string['task_sync_recordings_youtube'] = 'Sincronizar grabaciones de Zoom a YouTube';
+$string['task_sync_alternative_hosts'] = 'Sincronizar instructores del curso como anfitriones alternativos';
 
 // Eventos.
 $string['event_video_uploaded'] = 'Video cargado a YouTube';

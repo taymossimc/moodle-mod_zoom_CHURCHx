@@ -28,6 +28,7 @@ namespace mod_zoomyt;
 
 defined('MOODLE_INTERNAL') || die();
 
+global $CFG;
 require_once($CFG->libdir . '/filelib.php');
 
 /**
@@ -196,7 +197,7 @@ class youtube_service {
             'client_id' => $clientid,
             'redirect_uri' => $redirecturi,
             'response_type' => 'code',
-            'scope' => 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
+            'scope' => 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl',
             'access_type' => 'offline',
             'prompt' => 'consent',
             'state' => $state,

@@ -1430,3 +1430,100 @@ function zoomyt_get_user_display_name($zoomuserid) {
         return null;
     }
 }
+
+/**
+ * Get the email addresses of all course instructors (users with editing teacher role).
+ *
+ * This function returns email addresses of users who have the capability to add
+ * Zoom activities in the course context - typically editing teachers and managers.
+ *
+ * @param int $courseid The course ID.
+ * @param int|null $excludeuserid Optional user ID to exclude (e.g., the meeting host).
+ * @return array Array of email addresses.
+ */
+function zoomyt_get_course_instructor_emails($courseid, $excludeuserid = null) {
+    $context = context_course::instance($courseid);
+
+    // Get users who can add zoom instances - these are typically instructors.
+    $users = get_enrolled_users($context, 'mod/zoomyt:addinstance', 0, 'u.id, u.email', 'u.lastname');
+
+    $emails = [];
+    foreach ($users as $user) {
+        // Skip the excluded user if specified.
+        if ($excludeuserid !== null && $user->id == $excludeuserid) {
+            continue;
+        }
+        // Validate email format.
+        if (filter_var($user->email, FILTER_VALIDATE_EMAIL)) {
+            $emails[] = strtolower($user->email);
+        }
+    }
+
+    return array_unique($emails);
+}
+
+/**
+ * Merge instructor emails into the existing alternative hosts list.
+ *
+ * This function takes an existing alternative hosts string and merges in
+ * instructor emails, avoiding duplicates. It optionally excludes specified emails.
+ *
+ * @param string $existinghosts Comma-separated string of existing alternative host emails.
+ * @param array $instructoremails Array of instructor email addresses to add.
+ * @param string|null $hostemail Optional host email to exclude from the list.
+ * @return string Updated comma-separated string of alternative host emails.
+ */
+function zoomyt_merge_alternative_hosts($existinghosts, array $instructoremails, $hostemail = null) {
+    // Parse existing hosts.
+    $existingemails = zoomyt_get_alternative_host_array_from_string($existinghosts);
+
+    // Normalize to lowercase.
+    $existingemails = array_map('strtolower', $existingemails);
+    $instructoremails = array_map('strtolower', $instructoremails);
+
+    // Merge the lists.
+    $allhosts = array_unique(array_merge($existingemails, $instructoremails));
+
+    // Remove the host email if specified (host can't be alternative host of their own meeting).
+    if ($hostemail !== null) {
+        $hostemail = strtolower($hostemail);
+        $allhosts = array_filter($allhosts, function($email) use ($hostemail) {
+            return $email !== $hostemail;
+        });
+    }
+
+    // Remove empty entries.
+    $allhosts = array_filter($allhosts);
+
+    return implode(',', $allhosts);
+}
+
+/**
+ * Update the alternative hosts for a Zoom meeting on the Zoom server.
+ *
+ * This function updates only the alternative_hosts setting of an existing meeting.
+ *
+ * @param object $zoom The zoom instance object.
+ * @param string $alternativehosts Comma-separated string of alternative host emails.
+ * @return bool True if successful, false otherwise.
+ */
+function zoomyt_update_meeting_alternative_hosts($zoom, $alternativehosts) {
+    try {
+        $service = zoomyt_webservice();
+
+        // Update the meeting with the new alternative hosts.
+        $updatedata = new stdClass();
+        $updatedata->meeting_id = $zoom->meeting_id;
+        $updatedata->webinar = $zoom->webinar ?? false;
+        $updatedata->alternative_hosts = $alternativehosts;
+
+        // Call the update meeting method.
+        $service->update_meeting($updatedata);
+
+        debugging("ZOOMYT: Updated alternative hosts for meeting {$zoom->meeting_id}: {$alternativehosts}", DEBUG_DEVELOPER);
+        return true;
+    } catch (moodle_exception $e) {
+        debugging("ZOOMYT: Failed to update alternative hosts for meeting {$zoom->meeting_id}: " . $e->getMessage(), DEBUG_DEVELOPER);
+        return false;
+    }
+}

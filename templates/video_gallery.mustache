@@ -169,19 +169,19 @@
 </div>
 
 <style>
-/* Video Player Modal - Force Center */
+/* Video Player Modal - Force Center (accounting for navbar) */
 #videoPlayerModal .modal-dialog {
     position: fixed !important;
-    top: 50% !important;
+    top: calc(50% + 30px) !important;  /* Offset for navbar */
     left: 50% !important;
     transform: translate(-50%, -50%) !important;
     margin: 0 !important;
     max-width: 85vw !important;
     width: 85vw !important;
-    max-height: 90vh !important;
+    max-height: calc(90vh - 60px) !important;  /* Reduced height for navbar */
 }
 #videoPlayerModal .modal-content {
-    max-height: 90vh;
+    max-height: calc(90vh - 60px);
     overflow: hidden;
 }
 #videoPlayerModal .modal-body {
@@ -189,6 +189,10 @@
 }
 #videoPlayerModal .embed-responsive {
     background: #000;
+}
+/* Ensure modal backdrop doesn't interfere with navbar */
+#videoPlayerModal {
+    padding-top: 60px !important;  /* Space for navbar */
 }
 
 .zoom-yt-video-gallery .video-thumbnail-wrapper {

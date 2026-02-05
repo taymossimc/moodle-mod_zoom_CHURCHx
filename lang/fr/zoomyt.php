@@ -48,6 +48,8 @@ $string['alternative_hosts_picker'] = 'Afficher l\'option des hôtes alternatifs
 $string['alternative_hosts_picker_help'] = "L'option d'hôte alternatif vous permet de planifier des réunions et de désigner d'autres utilisateurs Zoom inscrits à ce cours pour démarrer la réunion.";
 $string['alternative_hosts_picker_noneselected'] = 'Aucun hôte alternatif sélectionné';
 $string['alternative_hosts_picker_placeholder'] = 'Sélectionner utilisateur(s)';
+$string['autoaddinstructorsashosts'] = 'Ajouter automatiquement les enseignants comme hôtes alternatifs';
+$string['autoaddinstructorsashosts_desc'] = 'Lorsque activé, tous les enseignants du cours (utilisateurs ayant la capacité d\'ajouter des activités Zoom) seront automatiquement ajoutés comme hôtes alternatifs lors de la création ou mise à jour d\'une réunion Zoom. Cela garantit que tout enseignant du cours peut démarrer et animer les réunions, peu importe qui a créé l\'activité.';
 $string['apiendpoint'] = 'Point de terminaison API Zoom';
 $string['apiendpoint_desc'] = 'Choisissez le point de terminaison API Zoom que l\'activité Zoom utilisera pour se connecter.';
 $string['apiendpoint_eu'] = 'Point de terminaison API UE';
@@ -529,6 +531,7 @@ $string['download_failed'] = 'Échec du téléchargement : {$a}';
 
 // Tâches planifiées.
 $string['task_sync_recordings_youtube'] = 'Synchroniser les enregistrements Zoom vers YouTube';
+$string['task_sync_alternative_hosts'] = 'Synchroniser les enseignants comme hôtes alternatifs';
 
 // Événements.
 $string['event_video_uploaded'] = 'Vidéo téléchargée sur YouTube';

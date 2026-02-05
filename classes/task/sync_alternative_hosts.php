@@ -28,6 +28,7 @@ namespace mod_zoomyt\task;
 
 defined('MOODLE_INTERNAL') || die();
 
+global $CFG;
 require_once($CFG->dirroot . '/mod/zoomyt/lib.php');
 require_once($CFG->dirroot . '/mod/zoomyt/locallib.php');
 

@@ -259,6 +259,8 @@
         <FIELD NAME="visible" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="Whether video is visible to students."/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="12" NOTNULL="true" SEQUENCE="false"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="12" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="caption_languages" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false" COMMENT="Comma-separated list of caption language codes (e.g., en,fr,es)."/>
+        <FIELD NAME="transcript_downloaded" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Whether transcript files have been downloaded."/>
       </FIELDS>
       <KEYS>
         <KEY NAME="id_primary" TYPE="primary" FIELDS="id"/>

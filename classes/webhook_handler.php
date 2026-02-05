@@ -306,7 +306,18 @@ class webhook_handler {
 
         $this->log("Queued recording fetch for activity {$zoom->id}");
 
-        return ['status' => 200, 'body' => ['message' => 'Recording fetch queued']];
+        // Also queue YouTube sync task to run after recording fetch completes.
+        // Add a 2-minute delay to ensure recording metadata is fetched first.
+        require_once($CFG->dirroot . '/mod/zoomyt/classes/task/sync_recordings_to_youtube.php');
+        
+        $yttask = new \mod_zoomyt\task\sync_recordings_to_youtube();
+        $yttask->set_custom_data(['instance_id' => $zoom->id, 'triggered_by' => 'webhook']);
+        $yttask->set_next_run_time(time() + 120); // Run in 2 minutes.
+        \core\task\manager::queue_adhoc_task($yttask, true);
+
+        $this->log("Queued YouTube sync for activity {$zoom->id} (delayed 2 minutes)");
+
+        return ['status' => 200, 'body' => ['message' => 'Recording fetch and YouTube sync queued']];
     }
 
     /**

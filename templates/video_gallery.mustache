@@ -49,8 +49,8 @@
             {{#videos}}
             <div class="col-md-6 col-lg-4 mb-4">
                 <div class="card h-100 video-card {{^visible}}video-hidden{{/visible}}" data-videoid="{{id}}">
-                    <div class="video-thumbnail-wrapper position-relative">
-                        <img src="{{thumbnail_url}}" class="card-img-top video-thumbnail" alt="{{title}}">
+                    <div class="video-thumbnail-wrapper position-relative" style="padding-top: 56.25%; overflow: hidden;">
+                        <img src="{{thumbnail_url}}" class="video-thumbnail" alt="{{title}}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover;">
                         <div class="video-duration-badge">{{duration}}</div>
                         <div class="video-play-overlay">
                             <i class="fa fa-play-circle fa-3x"></i>
@@ -65,6 +65,9 @@
                     </div>
                     <div class="card-body">
                         <h6 class="card-title video-title" title="{{title}}">{{title}}</h6>
+                        {{#description}}
+                        <p class="card-text video-description text-muted small mb-2">{{description_short}}</p>
+                        {{/description}}
                         <p class="card-text text-muted small">
                             <i class="fa fa-calendar"></i> {{session_date}}
                         </p>
@@ -138,8 +141,8 @@
     </div>
 
     {{! Video Player Modal }}
-    <div class="modal fade" id="videoPlayerModal" tabindex="-1" role="dialog">
-        <div class="modal-dialog modal-xl" role="document">
+    <div class="modal fade" id="videoPlayerModal" tabindex="-1" role="dialog" aria-labelledby="videoPlayerTitle" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered" role="document" style="max-width: 90vw; margin: auto;">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="videoPlayerTitle"></h5>
@@ -166,6 +169,28 @@
 </div>
 
 <style>
+/* Video Player Modal - Force Center */
+#videoPlayerModal .modal-dialog {
+    position: fixed !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    margin: 0 !important;
+    max-width: 85vw !important;
+    width: 85vw !important;
+    max-height: 90vh !important;
+}
+#videoPlayerModal .modal-content {
+    max-height: 90vh;
+    overflow: hidden;
+}
+#videoPlayerModal .modal-body {
+    padding: 0;
+}
+#videoPlayerModal .embed-responsive {
+    background: #000;
+}
+
 .zoom-yt-video-gallery .video-thumbnail-wrapper {
     cursor: pointer;
     overflow: hidden;

@@ -88,6 +88,10 @@ class video_gallery implements renderable, templatable {
             $item->id = $video->id;
             $item->title = $video->title;
             $item->description = $video->description;
+            // Create a short version of description for display under thumbnails.
+            $item->description_short = !empty($video->description)
+                ? (strlen($video->description) > 100 ? substr($video->description, 0, 100) . '...' : $video->description)
+                : '';
             $item->youtube_video_id = $video->youtube_video_id;
             $item->youtube_url = $video->youtube_url;
             $item->thumbnail_url = $video->thumbnail_url ?: $this->get_default_thumbnail($video->youtube_video_id);
@@ -96,6 +100,7 @@ class video_gallery implements renderable, templatable {
             $item->visible = (bool)$video->visible;
             $item->status = $video->status;
             $item->embed_url = 'https://www.youtube.com/embed/' . $video->youtube_video_id;
+            $item->caption_languages = $video->caption_languages ?? '';
 
             $result[] = $item;
         }
@@ -116,10 +121,16 @@ class video_gallery implements renderable, templatable {
     /**
      * Format duration in seconds to readable string.
      *
-     * @param int $seconds Duration in seconds.
+     * @param int|null $seconds Duration in seconds.
      * @return string Formatted duration.
      */
-    protected function format_duration(int $seconds): string {
+    protected function format_duration($seconds): string {
+        $seconds = (int)$seconds;
+
+        if ($seconds <= 0) {
+            return '-'; // Duration not yet available.
+        }
+
         if ($seconds < 60) {
             return $seconds . 's';
         }
@@ -161,9 +172,10 @@ class video_gallery implements renderable, templatable {
      * Get videos for teacher management view.
      *
      * @param int $zoomid The zoom activity ID.
+     * @param int|null $cmid Course module ID for transcript URLs.
      * @return array All videos including pending/failed.
      */
-    public static function get_all_videos_for_management(int $zoomid): array {
+    public static function get_all_videos_for_management(int $zoomid, ?int $cmid = null): array {
         global $DB;
 
         $sql = "SELECT zyv.*, zmr.recordingtype, zmr.externalurl as zoom_url
@@ -179,6 +191,7 @@ class video_gallery implements renderable, templatable {
             $item = new stdClass();
             $item->id = $video->id;
             $item->title = $video->title;
+            $item->description = $video->description ?? '';
             $item->youtube_video_id = $video->youtube_video_id;
             $item->youtube_url = $video->youtube_url;
             $item->thumbnail_url = $video->thumbnail_url;
@@ -186,11 +199,22 @@ class video_gallery implements renderable, templatable {
             $item->status_label = get_string('video_status_' . $video->status, 'zoomyt');
             $item->error_message = $video->error_message;
             $item->visible = (bool)$video->visible;
+            $item->visibility = $video->visibility ?? 'unlisted';
             $item->session_date = userdate($video->zoom_session_time, get_string('strftimedatetime'));
             $item->zoom_recording_deleted = (bool)$video->zoom_recording_deleted;
             $item->zoom_url = $video->zoom_url ?? null;
             $item->has_youtube = !empty($video->youtube_video_id);
             $item->has_zoom = !empty($video->zoom_url) && !$video->zoom_recording_deleted;
+            $item->caption_languages = $video->caption_languages ?? '';
+            $item->transcript_downloaded = (bool)($video->transcript_downloaded ?? false);
+
+            // Get transcript URLs if cmid is provided and transcripts exist.
+            $item->transcripts = [];
+            if ($cmid && $item->transcript_downloaded) {
+                require_once(__DIR__ . '/../youtube_service.php');
+                $item->transcripts = \mod_zoomyt\youtube_service::get_transcript_urls($video->id, $cmid);
+            }
+            $item->has_transcripts = !empty($item->transcripts);
 
             $result[] = $item;
         }

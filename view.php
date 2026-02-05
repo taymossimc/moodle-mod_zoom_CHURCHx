@@ -250,6 +250,31 @@ if (!$showrecreate) {
     echo $OUTPUT->box_end();
 }
 
+// Video Gallery Section - Show YouTube videos from this activity.
+// Moved above Schedule/Security/Media for better visibility.
+require_once($CFG->dirroot . '/mod/zoomyt/classes/output/video_gallery.php');
+$videogallery = new \mod_zoomyt\output\video_gallery($zoom->id, $cm->id, $iszoommanager);
+$gallerydata = $videogallery->export_for_template($OUTPUT);
+
+if ($gallerydata->hasvideos || $iszoommanager) {
+    echo $OUTPUT->box_start('', 'zoom_section-videos');
+
+    // Add JSON data for JavaScript.
+    $gallerydata->videos_json = json_encode($gallerydata->videos);
+
+    echo $OUTPUT->render_from_template('mod_zoomyt/video_gallery', $gallerydata);
+
+    // Show manage recordings link for teachers.
+    if ($iszoommanager) {
+        $manageurl = new moodle_url('/mod/zoomyt/manage_recordings.php', ['id' => $cm->id]);
+        echo html_writer::start_div('text-center mt-3');
+        echo html_writer::link($manageurl, get_string('manage_recordings', 'zoomyt'), ['class' => 'btn btn-outline-secondary']);
+        echo html_writer::end_div();
+    }
+
+    echo $OUTPUT->box_end();
+}
+
 if ($zoom->show_schedule) {
     echo $OUTPUT->box_start('', 'zoom_section-schedule');
     // Output "Schedule" heading.
@@ -615,30 +640,6 @@ if ($zoom->show_media) {
 
     // Output table.
     echo html_writer::table($table);
-    echo $OUTPUT->box_end();
-}
-
-// Video Gallery Section - Show YouTube videos from this activity.
-require_once($CFG->dirroot . '/mod/zoomyt/classes/output/video_gallery.php');
-$videogallery = new \mod_zoomyt\output\video_gallery($zoom->id, $cm->id, $iszoommanager);
-$gallerydata = $videogallery->export_for_template($OUTPUT);
-
-if ($gallerydata->hasvideos || $iszoommanager) {
-    echo $OUTPUT->box_start('', 'zoom_section-videos');
-
-    // Add JSON data for JavaScript.
-    $gallerydata->videos_json = json_encode($gallerydata->videos);
-
-    echo $OUTPUT->render_from_template('mod_zoomyt/video_gallery', $gallerydata);
-
-    // Show manage recordings link for teachers.
-    if ($iszoommanager) {
-        $manageurl = new moodle_url('/mod/zoomyt/manage_recordings.php', ['id' => $cm->id]);
-        echo html_writer::start_div('text-center mt-3');
-        echo html_writer::link($manageurl, get_string('manage_recordings', 'zoomyt'), ['class' => 'btn btn-outline-secondary']);
-        echo html_writer::end_div();
-    }
-
     echo $OUTPUT->box_end();
 }
 

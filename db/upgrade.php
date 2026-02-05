@@ -1496,5 +1496,26 @@ function xmldb_zoomyt_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026011128, 'zoomyt');
     }
 
+    if ($oldversion < 2026020400) {
+        // Add caption_languages and transcript_downloaded fields to zoomyt_videos table.
+        $table = new xmldb_table('zoomyt_videos');
+
+        // First add caption_languages if it doesn't exist.
+        $field = new xmldb_field('caption_languages', XMLDB_TYPE_CHAR, '100', null, null, null, null, 'timemodified');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Then add transcript_downloaded if it doesn't exist.
+        // Don't use AFTER clause to avoid dependency issues.
+        $field = new xmldb_field('transcript_downloaded', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Zoom savepoint reached.
+        upgrade_mod_savepoint(true, 2026020400, 'zoomyt');
+    }
+
     return true;
 }

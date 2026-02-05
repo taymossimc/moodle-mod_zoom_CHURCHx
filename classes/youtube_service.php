@@ -519,8 +519,10 @@ class youtube_service {
             'title' => $video->snippet->title ?? '',
             'description' => $video->snippet->description ?? '',
             'thumbnail_url' => $thumbnailurl,
+            'thumbnails' => $thumbnails,
             'duration' => $duration,
             'visibility' => $video->status->privacyStatus ?? 'unlisted',
+            'categoryId' => $video->snippet->categoryId ?? '22',
             'published_at' => $video->snippet->publishedAt ?? '',
         ];
     }
@@ -561,6 +563,544 @@ class youtube_service {
         }
 
         return true;
+    }
+
+    /**
+     * Update video title and description on YouTube.
+     *
+     * @param string $videoid YouTube video ID.
+     * @param string $title New title.
+     * @param string $description New description.
+     * @return bool True on success.
+     * @throws \moodle_exception On error.
+     */
+    public function update_video_metadata(string $videoid, string $title, string $description): bool {
+        $token = $this->get_access_token();
+
+        $curl = new \curl();
+        $curl->setHeader('Authorization: Bearer ' . $token);
+        $curl->setHeader('Content-Type: application/json');
+
+        // First get the current video to preserve category.
+        $currentvideo = $this->get_video_info($videoid);
+        $categoryid = $currentvideo->categoryId ?? '22'; // Default to "People & Blogs".
+
+        $data = [
+            'id' => $videoid,
+            'snippet' => [
+                'title' => $title,
+                'description' => $description,
+                'categoryId' => $categoryid,
+            ],
+        ];
+
+        $url = self::API_URL . '/videos?part=snippet';
+        $response = $curl->put($url, json_encode($data));
+
+        if ($curl->get_errno()) {
+            throw new \moodle_exception('youtube_api_error', 'zoomyt', '', $curl->error);
+        }
+
+        $result = json_decode($response);
+
+        if (isset($result->error)) {
+            throw new \moodle_exception('youtube_api_error', 'zoomyt', '', $result->error->message ?? 'Unknown error');
+        }
+
+        return true;
+    }
+
+    /**
+     * Get captions/subtitles list for a video.
+     *
+     * @param string $videoid YouTube video ID.
+     * @return array Array of caption tracks with language codes.
+     * @throws \moodle_exception On error.
+     */
+    public function get_video_captions(string $videoid): array {
+        $token = $this->get_access_token();
+
+        $curl = new \curl();
+        $curl->setHeader('Authorization: Bearer ' . $token);
+
+        $url = self::API_URL . '/captions?part=snippet&videoId=' . urlencode($videoid);
+        $response = $curl->get($url);
+
+        if ($curl->get_errno()) {
+            throw new \moodle_exception('youtube_api_error', 'zoomyt', '', $curl->error);
+        }
+
+        $result = json_decode($response);
+
+        if (isset($result->error)) {
+            // If no captions permission, return empty array instead of error.
+            if (strpos($result->error->message ?? '', 'forbidden') !== false) {
+                return [];
+            }
+            throw new \moodle_exception('youtube_api_error', 'zoomyt', '', $result->error->message ?? 'Unknown error');
+        }
+
+        $captions = [];
+        if (!empty($result->items)) {
+            foreach ($result->items as $item) {
+                $captions[] = [
+                    'id' => $item->id,
+                    'language' => $item->snippet->language ?? 'unknown',
+                    'name' => $item->snippet->name ?? '',
+                    'trackKind' => $item->snippet->trackKind ?? 'standard',
+                    'isAutoSynced' => $item->snippet->isAutoSynced ?? false,
+                ];
+            }
+        }
+
+        return $captions;
+    }
+
+    /**
+     * Download a caption track in SRT format.
+     *
+     * @param string $captionid The caption track ID.
+     * @return string The caption content in SRT format.
+     * @throws \moodle_exception On error.
+     */
+    public function download_caption(string $captionid): string {
+        $token = $this->get_access_token();
+
+        $curl = new \curl();
+        $curl->setHeader('Authorization: Bearer ' . $token);
+
+        // Request SRT format (tfmt=srt).
+        $url = self::API_URL . '/captions/' . urlencode($captionid) . '?tfmt=srt';
+        $response = $curl->get($url);
+
+        if ($curl->get_errno()) {
+            throw new \moodle_exception('youtube_api_error', 'zoomyt', '', $curl->error);
+        }
+
+        // Log the response for debugging.
+        debugging('Caption download response length: ' . strlen($response), DEBUG_DEVELOPER);
+
+        // Check for error response (JSON).
+        $decoded = @json_decode($response);
+        if (isset($decoded->error)) {
+            throw new \moodle_exception('youtube_api_error', 'zoomyt', '', $decoded->error->message ?? 'Unknown error');
+        }
+
+        return $response;
+    }
+
+    /**
+     * Sync video metadata from YouTube to local database.
+     *
+     * @param int $videoid Local zoomyt_videos record ID.
+     * @return bool True on success.
+     */
+    public function sync_video_from_youtube(int $videoid): bool {
+        global $DB;
+
+        $video = $DB->get_record('zoomyt_videos', ['id' => $videoid]);
+        if (!$video || empty($video->youtube_video_id)) {
+            return false;
+        }
+
+        try {
+            $ytinfo = $this->get_video_info($video->youtube_video_id);
+
+            $update = new \stdClass();
+            $update->id = $video->id;
+            $update->title = $ytinfo->title ?? $video->title;
+            $update->description = $ytinfo->description ?? $video->description;
+            $update->thumbnail_url = $ytinfo->thumbnail_url ?? $video->thumbnail_url;
+            $update->visibility = $ytinfo->visibility ?? $video->visibility;
+            $update->duration = $ytinfo->duration ?? $video->duration;
+            $update->timemodified = time();
+
+            $DB->update_record('zoomyt_videos', $update);
+
+            return true;
+        } catch (\Exception $e) {
+            debugging('Failed to sync video from YouTube: ' . $e->getMessage(), DEBUG_DEVELOPER);
+            return false;
+        }
+    }
+
+    /**
+     * Download and store transcripts for a video.
+     *
+     * @param int $videoid Local zoomyt_videos record ID.
+     * @param int $cmid Course module ID for file storage context.
+     * @return bool True on success.
+     */
+    public function download_and_store_transcripts(int $videoid, int $cmid): bool {
+        global $DB;
+
+        $video = $DB->get_record('zoomyt_videos', ['id' => $videoid]);
+        if (!$video || empty($video->youtube_video_id)) {
+            mtrace('  [Subtitle] ERROR: No video or YouTube ID for video ID ' . $videoid);
+            return false;
+        }
+
+        mtrace('  [Subtitle] Starting transcript download for: ' . $video->title . ' (YT: ' . $video->youtube_video_id . ')');
+
+        try {
+            // First try the official Captions API.
+            mtrace('  [Subtitle] Trying Method 1: Official YouTube Captions API...');
+            $captions = [];
+            try {
+                $captions = $this->get_video_captions($video->youtube_video_id);
+                mtrace('  [Subtitle] Official API returned ' . count($captions) . ' caption tracks');
+            } catch (\Exception $e) {
+                mtrace('  [Subtitle] Method 1 failed with exception: ' . $e->getMessage());
+            }
+
+            // Get the context for file storage.
+            $context = \context_module::instance($cmid);
+            $fs = get_file_storage();
+
+            // Delete any existing transcript files for this video.
+            $fs->delete_area_files($context->id, 'mod_zoomyt', 'transcripts', $video->id);
+
+            $downloadedlangs = [];
+
+            if (!empty($captions)) {
+                // Use official API to download captions.
+                foreach ($captions as $caption) {
+                    $lang = $caption['language'];
+                    try {
+                        $srtcontent = $this->download_caption($caption['id']);
+
+                        if (!empty($srtcontent) && strlen($srtcontent) > 10) {
+                            $fileinfo = [
+                                'contextid' => $context->id,
+                                'component' => 'mod_zoomyt',
+                                'filearea' => 'transcripts',
+                                'itemid' => $video->id,
+                                'filepath' => '/',
+                                'filename' => 'transcript_' . $lang . '.srt',
+                            ];
+
+                            $fs->create_file_from_string($fileinfo, $srtcontent);
+                            $downloadedlangs[] = $lang;
+                            debugging('Downloaded caption for lang: ' . $lang, DEBUG_DEVELOPER);
+                        }
+                    } catch (\Exception $e) {
+                        debugging('Failed to download caption for lang ' . $lang . ': ' . $e->getMessage(), DEBUG_DEVELOPER);
+                    }
+                }
+            }
+
+            // If official API failed, try public timedtext API as fallback.
+            if (empty($downloadedlangs)) {
+                mtrace('  [Subtitle] Method 1 (Official API) failed, trying Method 2 (Public API)...');
+                $publiccaptions = $this->get_public_captions($video->youtube_video_id);
+
+                foreach ($publiccaptions as $lang => $content) {
+                    if (!empty($content) && strlen($content) > 10) {
+                        $fileinfo = [
+                            'contextid' => $context->id,
+                            'component' => 'mod_zoomyt',
+                            'filearea' => 'transcripts',
+                            'itemid' => $video->id,
+                            'filepath' => '/',
+                            'filename' => 'transcript_' . $lang . '.srt',
+                        ];
+
+                        $fs->create_file_from_string($fileinfo, $content);
+                        $downloadedlangs[] = $lang;
+                        mtrace('  [Subtitle] Downloaded via Public API: ' . $lang);
+                    }
+                }
+            }
+
+            // If public API also failed, try yt-dlp as final fallback.
+            if (empty($downloadedlangs)) {
+                mtrace('  [Subtitle] Method 2 (Public API) failed, trying Method 3 (yt-dlp)...');
+                $ytdlpcaptions = $this->get_ytdlp_captions($video->youtube_video_id);
+
+                foreach ($ytdlpcaptions as $lang => $content) {
+                    if (!empty($content) && strlen($content) > 10) {
+                        $fileinfo = [
+                            'contextid' => $context->id,
+                            'component' => 'mod_zoomyt',
+                            'filearea' => 'transcripts',
+                            'itemid' => $video->id,
+                            'filepath' => '/',
+                            'filename' => 'transcript_' . $lang . '.srt',
+                        ];
+
+                        $fs->create_file_from_string($fileinfo, $content);
+                        $downloadedlangs[] = $lang;
+                        mtrace('  [Subtitle] Downloaded via yt-dlp: ' . $lang);
+                    }
+                }
+            }
+
+            // Update the video record.
+            $update = new \stdClass();
+            $update->id = $video->id;
+            $update->caption_languages = implode(',', $downloadedlangs);
+            $update->transcript_downloaded = !empty($downloadedlangs) ? 1 : 0;
+            $update->timemodified = time();
+            $DB->update_record('zoomyt_videos', $update);
+
+            if (!empty($downloadedlangs)) {
+                mtrace('  [Subtitle] SUCCESS! Downloaded transcripts: ' . implode(', ', $downloadedlangs));
+            } else {
+                mtrace('  [Subtitle] WARNING: No transcripts found after trying all methods');
+            }
+
+            return !empty($downloadedlangs);
+        } catch (\Exception $e) {
+            mtrace('  [Subtitle] ERROR: Exception during transcript download: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Get captions from YouTube's public timedtext API (fallback method).
+     *
+     * @param string $videoid YouTube video ID.
+     * @return array Array of [lang => srt_content].
+     */
+    protected function get_public_captions(string $videoid): array {
+        $result = [];
+
+        // Common language codes to try.
+        $languages = ['en', 'en-US', 'en-GB', 'fr', 'es', 'de', 'pt', 'it', 'ja', 'ko', 'zh-Hans', 'zh-Hant'];
+
+        $curl = new \curl();
+        $curl->setopt(['CURLOPT_FOLLOWLOCATION' => true, 'CURLOPT_TIMEOUT' => 30]);
+
+        foreach ($languages as $lang) {
+            // Try auto-generated captions first.
+            $url = 'https://www.youtube.com/api/timedtext?v=' . urlencode($videoid) . '&lang=' . urlencode($lang) . '&fmt=srt';
+            $response = $curl->get($url);
+
+            if (!$curl->get_errno() && !empty($response) && strlen($response) > 50) {
+                // Normalize language code (remove region).
+                $normLang = explode('-', $lang)[0];
+                if (!isset($result[$normLang])) {
+                    $result[$normLang] = $response;
+                }
+            }
+
+            // Also try with asr (auto-generated).
+            $url = 'https://www.youtube.com/api/timedtext?v=' . urlencode($videoid) . '&lang=' . urlencode($lang) . '&kind=asr&fmt=srt';
+            $response = $curl->get($url);
+
+            if (!$curl->get_errno() && !empty($response) && strlen($response) > 50) {
+                $normLang = explode('-', $lang)[0];
+                if (!isset($result[$normLang])) {
+                    $result[$normLang] = $response;
+                }
+            }
+        }
+
+        mtrace('  [Subtitle] Public timedtext API found ' . count($result) . ' languages');
+
+        return $result;
+    }
+
+    /**
+     * Get the path to yt-dlp binary, downloading it if necessary.
+     *
+     * @return string|null Path to yt-dlp binary, or null if unavailable.
+     */
+    public static function get_ytdlp_path(): ?string {
+        global $CFG;
+
+        // First check if yt-dlp is installed system-wide.
+        $systempath = trim(shell_exec('which yt-dlp 2>/dev/null') ?? '');
+        if (!empty($systempath) && is_executable($systempath)) {
+            mtrace('  [yt-dlp] Found system installation: ' . $systempath);
+            return $systempath;
+        }
+
+        // Check our local bin directory.
+        $bindir = $CFG->dataroot . '/mod_zoomyt/bin';
+        $localpath = $bindir . '/yt-dlp';
+
+        if (file_exists($localpath) && is_executable($localpath)) {
+            mtrace('  [yt-dlp] Using local installation: ' . $localpath);
+            return $localpath;
+        }
+
+        // Need to download yt-dlp.
+        mtrace('  [yt-dlp] Not found, attempting to download...');
+
+        // Create bin directory if needed.
+        if (!is_dir($bindir)) {
+            if (!mkdir($bindir, 0755, true)) {
+                mtrace('  [yt-dlp] ERROR: Could not create directory: ' . $bindir);
+                return null;
+            }
+        }
+
+        // Download yt-dlp from GitHub releases.
+        $downloadurl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+
+        $curl = new \curl();
+        $curl->setopt([
+            'CURLOPT_FOLLOWLOCATION' => true,
+            'CURLOPT_TIMEOUT' => 120,
+        ]);
+
+        $content = $curl->get($downloadurl);
+
+        if ($curl->get_errno() || empty($content) || strlen($content) < 1000000) {
+            mtrace('  [yt-dlp] ERROR: Download failed. Size: ' . strlen($content ?? ''));
+            return null;
+        }
+
+        // Save the binary.
+        if (file_put_contents($localpath, $content) === false) {
+            mtrace('  [yt-dlp] ERROR: Could not save binary to: ' . $localpath);
+            return null;
+        }
+
+        // Make it executable.
+        if (!chmod($localpath, 0755)) {
+            mtrace('  [yt-dlp] ERROR: Could not make binary executable');
+            unlink($localpath);
+            return null;
+        }
+
+        // Verify it works.
+        $version = trim(shell_exec($localpath . ' --version 2>/dev/null') ?? '');
+        if (empty($version)) {
+            mtrace('  [yt-dlp] ERROR: Binary downloaded but not executable');
+            unlink($localpath);
+            return null;
+        }
+
+        mtrace('  [yt-dlp] Successfully downloaded version: ' . $version);
+        return $localpath;
+    }
+
+    /**
+     * Download subtitles using yt-dlp.
+     *
+     * @param string $videoid YouTube video ID.
+     * @return array Array of [lang => srt_content].
+     */
+    protected function get_ytdlp_captions(string $videoid): array {
+        global $CFG;
+
+        $result = [];
+
+        // Get yt-dlp path.
+        $ytdlp = self::get_ytdlp_path();
+        if (!$ytdlp) {
+            mtrace('  [yt-dlp] Not available, skipping');
+            return $result;
+        }
+
+        // Create temp directory for subtitle files.
+        $tempdir = $CFG->dataroot . '/temp/zoomyt_subs_' . $videoid . '_' . time();
+        if (!mkdir($tempdir, 0755, true)) {
+            mtrace('  [yt-dlp] ERROR: Could not create temp directory');
+            return $result;
+        }
+
+        try {
+            $url = 'https://www.youtube.com/watch?v=' . $videoid;
+
+            // Download auto-generated subtitles.
+            $cmd = escapeshellcmd($ytdlp) . ' ' .
+                   '--skip-download ' .
+                   '--write-auto-sub ' .
+                   '--sub-lang en,fr,es,de,pt,it ' .
+                   '--sub-format srt ' .
+                   '--convert-subs srt ' .
+                   '-o ' . escapeshellarg($tempdir . '/%(id)s.%(ext)s') . ' ' .
+                   escapeshellarg($url) . ' 2>&1';
+
+            mtrace('  [yt-dlp] Running command for auto-subs...');
+            $output = shell_exec($cmd);
+            mtrace('  [yt-dlp] Output: ' . substr($output ?? '', 0, 500));
+
+            // Also try manual subtitles.
+            $cmd2 = escapeshellcmd($ytdlp) . ' ' .
+                    '--skip-download ' .
+                    '--write-sub ' .
+                    '--sub-lang en,fr,es,de,pt,it ' .
+                    '--sub-format srt ' .
+                    '--convert-subs srt ' .
+                    '-o ' . escapeshellarg($tempdir . '/%(id)s.%(ext)s') . ' ' .
+                    escapeshellarg($url) . ' 2>&1';
+
+            mtrace('  [yt-dlp] Running command for manual subs...');
+            $output2 = shell_exec($cmd2);
+            mtrace('  [yt-dlp] Output: ' . substr($output2 ?? '', 0, 500));
+
+            // Read any downloaded subtitle files.
+            $files = glob($tempdir . '/*.srt');
+            mtrace('  [yt-dlp] Found ' . count($files) . ' subtitle files');
+
+            foreach ($files as $file) {
+                $filename = basename($file);
+                // Extract language from filename (e.g., "VIDEO_ID.en.srt").
+                if (preg_match('/\.([a-z]{2}(?:-[A-Za-z]+)?)\.srt$/', $filename, $matches)) {
+                    $lang = strtolower(explode('-', $matches[1])[0]); // Normalize to 2-letter code.
+                    $content = file_get_contents($file);
+                    if (!empty($content) && strlen($content) > 50) {
+                        $result[$lang] = $content;
+                        mtrace('  [yt-dlp] Loaded subtitle: ' . $lang . ' (' . strlen($content) . ' bytes)');
+                    }
+                }
+            }
+
+        } finally {
+            // Clean up temp directory.
+            $files = glob($tempdir . '/*');
+            foreach ($files as $file) {
+                unlink($file);
+            }
+            rmdir($tempdir);
+        }
+
+        mtrace('  [yt-dlp] Total languages found: ' . count($result));
+        return $result;
+    }
+
+    /**
+     * Get transcript file URLs for a video.
+     *
+     * @param int $videoid Local zoomyt_videos record ID.
+     * @param int $cmid Course module ID.
+     * @return array Array of ['lang' => 'en', 'url' => '...'] entries.
+     */
+    public static function get_transcript_urls(int $videoid, int $cmid): array {
+        $context = \context_module::instance($cmid);
+        $fs = get_file_storage();
+
+        $files = $fs->get_area_files($context->id, 'mod_zoomyt', 'transcripts', $videoid, 'filename', false);
+
+        $urls = [];
+        foreach ($files as $file) {
+            $filename = $file->get_filename();
+            // Extract language from filename (transcript_en.srt -> en).
+            if (preg_match('/transcript_(\w+)\.srt/', $filename, $matches)) {
+                $lang = $matches[1];
+                $url = \moodle_url::make_pluginfile_url(
+                    $context->id,
+                    'mod_zoomyt',
+                    'transcripts',
+                    $videoid,
+                    '/',
+                    $filename,
+                    true // Force download.
+                );
+                $urls[] = [
+                    'lang' => $lang,
+                    'lang_upper' => strtoupper($lang),
+                    'url' => $url->out(),
+                    'filename' => $filename,
+                ];
+            }
+        }
+
+        return $urls;
     }
 
     /**

@@ -676,6 +676,16 @@ class webservice {
 
         try {
             $founduser = $this->make_call($url);
+
+            // Debug: Show account info to help diagnose cross-account issues.
+            if ($founduser) {
+                $debuginfo = 'ZOOMYT get_user result: id=' . ($founduser->id ?? 'null');
+                $debuginfo .= ', email=' . ($founduser->email ?? 'null');
+                $debuginfo .= ', account_id=' . ($founduser->account_id ?? 'NOT RETURNED');
+                $debuginfo .= ', status=' . ($founduser->status ?? 'null');
+                $debuginfo .= ', type=' . ($founduser->type ?? 'null');
+                debugging($debuginfo, DEBUG_DEVELOPER);
+            }
         } catch (webservice_exception $error) {
             if (zoomyt_is_user_not_found_error($error)) {
                 return false;
@@ -826,6 +836,27 @@ class webservice {
         if (empty($zoom->webinar)) {
             $data['settings']['participant_video'] = (bool) ($zoom->option_participants_video);
             $data['settings']['join_before_host'] = (bool) ($zoom->option_jbh);
+
+            // If join_before_host is enabled, also set jbh_time to control how early participants can join.
+            // Zoom jbh_time values: 0 = anytime, 5 = 5 mins, 10 = 10 mins, 15 = 15 mins before start.
+            if (!empty($zoom->option_jbh)) {
+                // Get the effective join before start setting from Moodle.
+                $joinbeforestart = zoomyt_get_effective_joinbeforestart($zoom);
+
+                // Map Moodle minutes to Zoom jbh_time values.
+                // Zoom only accepts: 0 (anytime), 5, 10, 15.
+                if ($joinbeforestart == -1 || $joinbeforestart >= 15) {
+                    // Anytime or 15+ minutes = set to 0 (anytime) in Zoom.
+                    $data['settings']['jbh_time'] = 0;
+                } else if ($joinbeforestart >= 10) {
+                    $data['settings']['jbh_time'] = 15;
+                } else if ($joinbeforestart >= 5) {
+                    $data['settings']['jbh_time'] = 10;
+                } else {
+                    $data['settings']['jbh_time'] = 5;
+                }
+            }
+
             $data['settings']['encryption_type'] = (isset($zoom->option_encryption_type) &&
                     $zoom->option_encryption_type === ZOOM_ENCRYPTION_TYPE_E2EE) ?
                     ZOOM_ENCRYPTION_TYPE_E2EE : ZOOM_ENCRYPTION_TYPE_ENHANCED;
@@ -900,23 +931,33 @@ class webservice {
         // Checks whether we need to recycle licenses and acts accordingly.
         // Classic: user:read:admin.
         // Granular: user:read:user:admin.
-        if ($this->recyclelicenses && $this->make_call("users/$zoomuserid")->type == ZOOM_USER_TYPE_BASIC) {
-            $licenseisavailable = !$this->paid_user_limit_reached();
-            if (!$licenseisavailable) {
-                $leastrecentlyactivepaiduserid = $this->get_least_recently_active_paid_user_id();
-                // Changes least_recently_active_user to a basic user so we can use their license.
-                if ($leastrecentlyactivepaiduserid) {
-                    $this->make_call("users/$leastrecentlyactivepaiduserid", ['type' => ZOOM_USER_TYPE_BASIC], 'patch');
-                    $licenseisavailable = true;
+        if (!$this->recyclelicenses) {
+            return; // License recycling not enabled, nothing to do.
+        }
+
+        try {
+            $userinfo = $this->make_call("users/$zoomuserid");
+            if ($userinfo->type == ZOOM_USER_TYPE_BASIC) {
+                $licenseisavailable = !$this->paid_user_limit_reached();
+                if (!$licenseisavailable) {
+                    $leastrecentlyactivepaiduserid = $this->get_least_recently_active_paid_user_id();
+                    // Changes least_recently_active_user to a basic user so we can use their license.
+                    if ($leastrecentlyactivepaiduserid) {
+                        $this->make_call("users/$leastrecentlyactivepaiduserid", ['type' => ZOOM_USER_TYPE_BASIC], 'patch');
+                        $licenseisavailable = true;
+                    }
+                }
+
+                // Changes current user to pro so they can make a meeting.
+                // Classic: user:write:admin.
+                // Granular: user:update:user:admin.
+                if ($licenseisavailable) {
+                    $this->make_call("users/$zoomuserid", ['type' => ZOOM_USER_TYPE_PRO], 'patch');
                 }
             }
-
-            // Changes current user to pro so they can make a meeting.
-            // Classic: user:write:admin.
-            // Granular: user:update:user:admin.
-            if ($licenseisavailable) {
-                $this->make_call("users/$zoomuserid", ['type' => ZOOM_USER_TYPE_PRO], 'patch');
-            }
+        } catch (\Exception $e) {
+            // If we can't check/upgrade license, just continue - the user might already have a license.
+            debugging('Could not check/upgrade user license: ' . $e->getMessage(), DEBUG_DEVELOPER);
         }
     }
 
@@ -929,6 +970,8 @@ class webservice {
      * @return stdClass The call response.
      */
     public function create_meeting($zoom, $cmid) {
+        debugging('ZOOMYT: create_meeting called for host_id: ' . $zoom->host_id, DEBUG_DEVELOPER);
+
         // Provide license if needed.
         $this->provide_license($zoom->host_id);
 
@@ -937,7 +980,16 @@ class webservice {
         // Classic: webinar:write:admin.
         // Granular: webinar:write:webinar:admin.
         $url = "users/$zoom->host_id/" . (!empty($zoom->webinar) ? 'webinars' : 'meetings');
-        return $this->make_call($url, $this->database_to_api($zoom, $cmid), 'post');
+        debugging('ZOOMYT: Creating meeting at URL: ' . $url, DEBUG_DEVELOPER);
+
+        try {
+            $response = $this->make_call($url, $this->database_to_api($zoom, $cmid), 'post');
+            debugging('ZOOMYT: Meeting created successfully, meeting_id: ' . ($response->id ?? 'unknown'), DEBUG_DEVELOPER);
+            return $response;
+        } catch (\Exception $e) {
+            debugging('ZOOMYT: create_meeting FAILED: ' . $e->getMessage(), DEBUG_DEVELOPER);
+            throw $e;
+        }
     }
 
     /**

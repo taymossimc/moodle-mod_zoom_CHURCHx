@@ -442,23 +442,28 @@ function zoomyt_get_state($zoom, $ishost = false, $isteacher = false) {
 function zoomyt_get_user_id($required = true) {
     global $USER;
 
-    $cache = cache::make('mod_zoomyt', 'zoomytid');
-    if (!($zoomuserid = $cache->get($USER->id))) {
-        $zoomuserid = false;
-        try {
-            $zoomuser = zoomyt_get_user(zoomyt_get_api_identifier($USER));
-            if ($zoomuser !== false && isset($zoomuser->id) && ($zoomuser->id !== false)) {
-                $zoomuserid = $zoomuser->id;
-                $cache->set($USER->id, $zoomuserid);
-            }
-            // If user does not have a Zoom account, throw an error.
-            if ($required && $zoomuser === false) {
-                throw new moodle_exception('zoomerr_usernotfound', 'mod_zoomyt', '', get_config('zoomyt', 'zoomurl'));
-            }
-        } catch (moodle_exception $error) {
-            if ($required) {
-                throw $error;
-            }
+    // v1.8.5 - COMPLETELY BYPASS CACHE - Always look up fresh by email.
+    $identifier = zoomyt_get_api_identifier($USER);
+    
+    // TEMPORARY VISIBLE DEBUG - This will show on the page if the new code is running.
+    debugging('ZOOMYT v1.8.5: Looking up Zoom user by email: ' . $identifier, DEBUG_DEVELOPER);
+    
+    $zoomuserid = false;
+
+    try {
+        $zoomuser = zoomyt_webservice()->get_user($identifier);
+        if ($zoomuser !== false && isset($zoomuser->id) && ($zoomuser->id !== false)) {
+            $zoomuserid = $zoomuser->id;
+            debugging('ZOOMYT v1.8.5: Found Zoom user ID: ' . $zoomuserid, DEBUG_DEVELOPER);
+        }
+        // If user does not have a Zoom account, throw an error.
+        if ($required && $zoomuser === false) {
+            throw new moodle_exception('zoomerr_usernotfound', 'mod_zoomyt', '', get_config('zoomyt', 'zoomurl'));
+        }
+    } catch (\Exception $error) {
+        debugging('ZOOMYT v1.8.5 Exception: ' . $error->getMessage(), DEBUG_DEVELOPER);
+        if ($required) {
+            throw $error;
         }
     }
 
@@ -910,19 +915,29 @@ function zoomyt_get_api_identifier($user) {
     // Get the value from the config first.
     $field = get_config('zoomyt', 'apiidentifier');
 
+    // DEBUG: Log the configured field.
+    debugging('zoomyt_get_api_identifier: apiidentifier config = ' . var_export($field, true), DEBUG_DEVELOPER);
+
     $identifier = '';
-    if (isset($user->$field)) {
-        // If one of the standard user fields.
-        $identifier = $user->$field;
-    } else if (isset($user->profile[$field])) {
-        // If one of the custom user fields.
-        $identifier = $user->profile[$field];
+
+    // Only try to use the configured field if it's not empty.
+    if (!empty($field)) {
+        if (isset($user->$field)) {
+            // If one of the standard user fields.
+            $identifier = $user->$field;
+        } else if (isset($user->profile) && isset($user->profile[$field])) {
+            // If one of the custom user fields.
+            $identifier = $user->profile[$field];
+        }
     }
 
     if (empty($identifier)) {
-        // Fallback to email if the field is not set.
+        // Fallback to email if the field is not set or empty.
         $identifier = $user->email;
     }
+
+    // DEBUG: Log the final identifier.
+    debugging('zoomyt_get_api_identifier: returning identifier = ' . $identifier, DEBUG_DEVELOPER);
 
     return $identifier;
 }

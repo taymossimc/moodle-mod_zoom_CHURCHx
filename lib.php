@@ -981,11 +981,41 @@ function zoomyt_get_file_info($browser, $areas, $course, $cm, $context, $fileare
  * @param array $options additional options affecting the file serving
  */
 function zoomyt_pluginfile($course, $cm, $context, $filearea, array $args, $forcedownload, array $options = []) {
+    global $DB;
+
     if ($context->contextlevel != CONTEXT_MODULE) {
         send_file_not_found();
     }
 
     require_login($course, true, $cm);
+
+    // Handle transcript files.
+    if ($filearea === 'transcripts') {
+        $itemid = array_shift($args);
+        $filename = array_pop($args);
+        $filepath = $args ? '/' . implode('/', $args) . '/' : '/';
+
+        // Check if user can access this transcript.
+        // Teachers can always access, students can only access visible videos.
+        $canmanage = has_capability('mod/zoomyt:addinstance', $context);
+
+        if (!$canmanage) {
+            // Check if the video is visible.
+            $video = $DB->get_record('zoomyt_videos', ['id' => $itemid]);
+            if (!$video || !$video->visible) {
+                send_file_not_found();
+            }
+        }
+
+        $fs = get_file_storage();
+        $file = $fs->get_file($context->id, 'mod_zoomyt', $filearea, $itemid, $filepath, $filename);
+
+        if (!$file || $file->is_directory()) {
+            send_file_not_found();
+        }
+
+        send_stored_file($file, 86400, 0, $forcedownload, $options);
+    }
 
     send_file_not_found();
 }
@@ -1469,22 +1499,93 @@ function zoomyt_cm_info_view(cm_info $cm) {
             ),
             'zoomyt-join-button mt-2'
         );
+    } else if ($finished) {
+        // Meeting has finished - check if there are recordings or videos.
+        $hasrecordings = $DB->record_exists('zoomyt_meeting_recordings', ['zoomid' => $moduleinstance->id, 'showrecording' => 1]);
+        $hasvideos = $DB->record_exists_select('zoomyt_videos', 
+            'zoomid = :zoomid AND status = :status AND visible = 1',
+            ['zoomid' => $moduleinstance->id, 'status' => 'uploaded']
+        );
+
+        if ($hasrecordings || $hasvideos) {
+            // Has recordings/videos - show "View Recordings" button.
+            $buttonhtml = html_writer::div(
+                html_writer::link(
+                    $viewurl,
+                    get_string('viewrecordings', 'zoomyt'),
+                    ['class' => 'btn btn-success']
+                ),
+                'zoomyt-join-button mt-2'
+            );
+        } else {
+            // No recordings - show "Session Ended" button.
+            $buttonhtml = html_writer::div(
+                html_writer::link(
+                    $viewurl,
+                    get_string('sessionended', 'zoomyt'),
+                    ['class' => 'btn btn-outline-secondary']
+                ),
+                'zoomyt-join-button mt-2'
+            );
+        }
     } else {
-        // Meeting not yet available or already finished - link to activity page.
-        $buttonhtml = html_writer::div(
+        // Meeting not yet available - show next meeting date.
+        // Get the next start time.
+        $nextstart = null;
+        if ($moduleinstance->recurring && $moduleinstance->recurrence_type != ZOOM_RECURRINGTYPE_NOTIME) {
+            $nextstart = zoomyt_get_next_occurrence($moduleinstance);
+        } else if (!$moduleinstance->recurring) {
+            $nextstart = $moduleinstance->start_time;
+        }
+
+        // Only show button if there's a scheduled meeting in the future.
+        if ($nextstart && $nextstart > time()) {
+            // Format the date nicely.
+            $dateformat = get_string('strftimedatetime', 'langconfig');
+            $formatteddate = userdate($nextstart, $dateformat);
+            $buttontext = get_string('next_meeting', 'zoomyt', $formatteddate);
+
+            $buttonhtml = html_writer::div(
+                html_writer::link(
+                    $viewurl,
+                    $buttontext,
+                    ['class' => 'btn btn-outline-secondary']
+                ),
+                'zoomyt-join-button mt-2'
+            );
+        } else {
+            // No scheduled meetings - don't show button.
+            $buttonhtml = '';
+        }
+    }
+
+    // Check if there are visible recordings to show "View Recorded Sessions" button.
+    $hasvisiblerecordings = $DB->record_exists_select('zoomyt_videos',
+        'zoomid = :zoomid AND status = :status AND visible = 1',
+        ['zoomid' => $moduleinstance->id, 'status' => 'uploaded']
+    );
+
+    if ($hasvisiblerecordings && !$finished) {
+        // Add "View Recorded Sessions" button next to the meeting button.
+        $buttonhtml .= html_writer::div(
             html_writer::link(
                 $viewurl,
-                get_string('meetingnotyetavailable', 'zoomyt'),
-                ['class' => 'btn btn-outline-secondary disabled']
+                get_string('view_recorded_sessions', 'zoomyt'),
+                ['class' => 'btn btn-success ml-2']
             ),
-            'zoomyt-join-button mt-2'
+            'zoomyt-recordings-button mt-2 d-inline-block'
         );
+    }
+
+    // Wrap buttons in a flex container for side-by-side display.
+    if (!empty($buttonhtml)) {
+        $buttonhtml = html_writer::div($buttonhtml, 'd-flex flex-wrap gap-2');
     }
 
     // Get the formatted intro/description.
     $intro = format_module_intro('zoomyt', $moduleinstance, $cm->id);
 
-    // Set content to include intro plus the button below it.
+    // Set content to include intro plus the button(s) below it.
     $cm->set_content($intro . $buttonhtml);
 }
 

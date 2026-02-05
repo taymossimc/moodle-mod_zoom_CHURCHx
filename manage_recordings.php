@@ -98,6 +98,7 @@ if ($action === 'syncrecordings') {
 if ($action === 'syncyoutube') {
     require_sesskey();
     require_once($CFG->dirroot . '/mod/zoomyt/classes/task/sync_recordings_to_youtube.php');
+    require_once($CFG->dirroot . '/mod/zoomyt/classes/youtube_service.php');
 
     try {
         $task = new \mod_zoomyt\task\sync_recordings_to_youtube();
@@ -107,12 +108,38 @@ if ($action === 'syncyoutube') {
     } catch (Exception $e) {
         \core\notification::error(get_string('sync_youtube_error', 'zoomyt', $e->getMessage()));
     }
+
+    // Also sync metadata and transcripts from YouTube for uploaded videos.
+    try {
+        $ytservice = \mod_zoomyt\youtube_service::get_instance_for_activity($zoom->id);
+        if ($ytservice && $ytservice->is_configured()) {
+            // Get all uploaded videos for this activity.
+            $uploadedvideos = $DB->get_records('zoomyt_videos', [
+                'zoomid' => $zoom->id,
+                'status' => 'uploaded',
+            ]);
+
+            foreach ($uploadedvideos as $video) {
+                // Sync metadata from YouTube (title, description, thumbnail, visibility).
+                $ytservice->sync_video_from_youtube($video->id);
+
+                // Download transcripts if not already downloaded.
+                if (empty($video->transcript_downloaded)) {
+                    $ytservice->download_and_store_transcripts($video->id, $cm->id);
+                }
+            }
+        }
+    } catch (Exception $e) {
+        // Don't fail the whole sync if transcript download fails.
+        debugging('Transcript sync error: ' . $e->getMessage(), DEBUG_DEVELOPER);
+    }
+
     redirect(new moodle_url('/mod/zoomyt/manage_recordings.php', ['id' => $id]));
 }
 
 // Get all videos for this activity.
 require_once($CFG->dirroot . '/mod/zoomyt/classes/output/video_gallery.php');
-$videos = \mod_zoomyt\output\video_gallery::get_all_videos_for_management($zoom->id);
+$videos = \mod_zoomyt\output\video_gallery::get_all_videos_for_management($zoom->id, $cm->id);
 
 // Get Zoom meeting recordings that haven't been synced yet.
 // Use CONCAT to create a unique key for each row (uuid + recordingid).
@@ -179,7 +206,7 @@ echo html_writer::link($syncyoutubeurl,
 echo html_writer::end_div();
 
 // YouTube Videos Section.
-echo $OUTPUT->heading(get_string('video_gallery', 'zoomyt'), 3);
+echo $OUTPUT->heading(get_string('session_recordings', 'zoomyt'), 3);
 
 if (empty($videos)) {
     echo html_writer::tag('p', get_string('no_videos', 'zoomyt'), ['class' => 'alert alert-info']);
@@ -187,38 +214,94 @@ if (empty($videos)) {
     $table = new html_table();
     $table->head = [
         get_string('name'),
+        get_string('description'),
         get_string('session_date', 'zoomyt'),
         get_string('youtube_status', 'zoomyt'),
+        get_string('transcript', 'zoomyt'),
         get_string('visibility'),
         get_string('actions'),
     ];
     $table->attributes['class'] = 'table table-striped';
+    $table->id = 'zoomyt-videos-table';
 
     foreach ($videos as $video) {
         $row = new html_table_row();
+        $row->id = 'video-row-' . $video->id;
 
-        // Title.
-        $titlecell = $video->title;
+        // Title - make it editable with a click.
+        $titlecell = html_writer::span(
+            s($video->title),
+            'editable-title',
+            [
+                'data-videoid' => $video->id,
+                'data-field' => 'title',
+                'title' => get_string('click_to_edit', 'zoomyt'),
+                'style' => 'cursor: pointer; border-bottom: 1px dashed #007bff;',
+            ]
+        );
         if ($video->has_youtube) {
-            $titlecell = html_writer::link($video->youtube_url, $video->title, ['target' => '_blank']);
+            $titlecell .= ' ' . html_writer::link($video->youtube_url, '<i class="fa fa-external-link"></i>', [
+                'target' => '_blank',
+                'title' => get_string('view_on_youtube', 'zoomyt'),
+                'class' => 'text-muted small',
+            ]);
         }
 
-        // Status with badge.
-        $statusclass = 'badge-secondary';
-        if ($video->status === 'uploaded') {
-            $statusclass = 'badge-success';
-        } else if ($video->status === 'failed') {
-            $statusclass = 'badge-danger';
-        } else if (in_array($video->status, ['downloading', 'uploading'])) {
-            $statusclass = 'badge-warning';
-        }
-        $statuscell = html_writer::span($video->status_label, 'badge ' . $statusclass);
+        // Description - editable.
+        $desctext = !empty($video->description) ? s(substr($video->description, 0, 100)) . (strlen($video->description) > 100 ? '...' : '') : '-';
+        $descriptioncell = html_writer::span(
+            $desctext,
+            'editable-description',
+            [
+                'data-videoid' => $video->id,
+                'data-field' => 'description',
+                'title' => get_string('click_to_edit', 'zoomyt'),
+                'style' => 'cursor: pointer; border-bottom: 1px dashed #007bff;',
+            ]
+        );
 
-        if ($video->status === 'failed' && $video->error_message) {
-            $statuscell .= html_writer::tag('small', ' ' . $video->error_message, ['class' => 'text-danger d-block']);
+        // Status with badges for visibility and captions.
+        $statusbadges = [];
+
+        // YouTube visibility badge.
+        $visibilityclass = 'badge-secondary';
+        $visibilitytext = ucfirst($video->visibility ?? 'unknown');
+        if ($video->visibility === 'public') {
+            $visibilityclass = 'badge-success';
+        } else if ($video->visibility === 'unlisted') {
+            $visibilityclass = 'badge-info';
+        } else if ($video->visibility === 'private') {
+            $visibilityclass = 'badge-warning';
+        }
+        $statusbadges[] = html_writer::span($visibilitytext, 'badge ' . $visibilityclass);
+
+        // Caption language badges.
+        $captionlangs = !empty($video->caption_languages) ? explode(',', $video->caption_languages) : [];
+        foreach ($captionlangs as $lang) {
+            $lang = trim(strtoupper($lang));
+            if ($lang) {
+                $statusbadges[] = html_writer::span('CC ' . $lang, 'badge badge-dark', ['title' => get_string('captions_available', 'zoomyt')]);
+            }
         }
 
-        // Visibility.
+        $statuscell = implode(' ', $statusbadges);
+
+        // Upload status.
+        if ($video->status !== 'uploaded') {
+            $statusclass = 'badge-secondary';
+            if ($video->status === 'failed') {
+                $statusclass = 'badge-danger';
+            } else if (in_array($video->status, ['downloading', 'uploading'])) {
+                $statusclass = 'badge-warning';
+            }
+            $statuscell .= ' ' . html_writer::span($video->status_label, 'badge ' . $statusclass);
+
+            if ($video->status === 'failed' && $video->error_message) {
+                $statuscell .= html_writer::tag('small', ' ' . $video->error_message, ['class' => 'text-danger d-block']);
+            }
+        }
+
+        // Student visibility.
         $visibletext = $video->visible ? get_string('video_visible', 'zoomyt') : get_string('video_hidden', 'zoomyt');
         $visibleclass = $video->visible ? 'text-success' : 'text-muted';
         $visiblecell = html_writer::span($visibletext, $visibleclass);
@@ -246,11 +329,42 @@ if (empty($videos)) {
             ]);
         }
 
+        // Transcript column - show download links for available transcripts.
+        $transcriptcell = '';
+        if ($video->has_transcripts && !empty($video->transcripts)) {
+            // Show download links for each transcript file.
+            $transcriptlinks = [];
+            foreach ($video->transcripts as $transcript) {
+                // Add download attribute to trigger save dialog.
+                $transcriptlinks[] = html_writer::link(
+                    $transcript['url'],
+                    '<i class="fa fa-download"></i> ' . $transcript['lang_upper'],
+                    [
+                        'class' => 'badge badge-info',
+                        'download' => $transcript['filename'],
+                        'title' => get_string('download_transcript', 'zoomyt'),
+                    ]
+                );
+            }
+            $transcriptcell = implode(' ', $transcriptlinks);
+        } else if ($video->has_youtube) {
+            // Transcripts not yet downloaded - will be fetched on next sync.
+            $transcriptcell = html_writer::span(
+                get_string('pending_sync', 'zoomyt'),
+                'text-muted small',
+                ['title' => get_string('transcripts_sync_hint', 'zoomyt')]
+            );
+        } else {
+            $transcriptcell = '-';
+        }
+
         $row->cells = [
-            $titlecell,
+            new html_table_cell($titlecell),
+            new html_table_cell($descriptioncell),
             $video->session_date,
-            $statuscell,
-            $visiblecell,
+            new html_table_cell($statuscell),
+            new html_table_cell($transcriptcell),
+            new html_table_cell($visiblecell),
             implode(' ', $actions),
         ];
 
@@ -258,6 +372,89 @@ if (empty($videos)) {
     }
 
     echo html_writer::table($table);
+
+    // Add inline edit modal.
+    echo '
+    <div class="modal fade" id="editVideoModal" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">' . get_string('edit_video', 'zoomyt') . '</h5>
+                    <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="edit-video-id">
+                    <div class="form-group">
+                        <label for="edit-video-title">' . get_string('title', 'zoomyt') . '</label>
+                        <input type="text" class="form-control" id="edit-video-title">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-video-description">' . get_string('description') . '</label>
+                        <textarea class="form-control" id="edit-video-description" rows="4"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">' . get_string('cancel') . '</button>
+                    <button type="button" class="btn btn-primary" id="save-video-btn">' . get_string('savechanges') . '</button>
+                </div>
+            </div>
+        </div>
+    </div>';
+
+    // Add JavaScript for inline editing.
+    $PAGE->requires->js_amd_inline('
+        require(["jquery"], function($) {
+            var sesskey = "' . sesskey() . '";
+            var ajaxurl = M.cfg.wwwroot + "/mod/zoomyt/ajax_video.php";
+
+            // Click handler for editable fields.
+            $(".editable-title, .editable-description").on("click", function() {
+                var videoid = $(this).data("videoid");
+                
+                // Fetch current data.
+                $.post(ajaxurl, {
+                    action: "get",
+                    videoid: videoid,
+                    sesskey: sesskey
+                }, function(response) {
+                    if (response.success) {
+                        $("#edit-video-id").val(response.video.id);
+                        $("#edit-video-title").val(response.video.title);
+                        $("#edit-video-description").val(response.video.description);
+                        $("#editVideoModal").modal("show");
+                    } else {
+                        alert(response.message);
+                    }
+                }, "json");
+            });
+
+            // Save button handler.
+            $("#save-video-btn").on("click", function() {
+                var videoid = $("#edit-video-id").val();
+                var title = $("#edit-video-title").val();
+                var description = $("#edit-video-description").val();
+
+                $.post(ajaxurl, {
+                    action: "update",
+                    videoid: videoid,
+                    title: title,
+                    description: description,
+                    sesskey: sesskey
+                }, function(response) {
+                    if (response.success) {
+                        // Update the table row.
+                        var row = $("#video-row-" + videoid);
+                        row.find(".editable-title").text(response.title);
+                        var descPreview = response.description ? response.description.substring(0, 100) + (response.description.length > 100 ? "..." : "") : "-";
+                        row.find(".editable-description").text(descPreview);
+                        $("#editVideoModal").modal("hide");
+                    } else {
+                        alert(response.message);
+                    }
+                }, "json");
+            });
+        });
+    ');
 }
 
 // Past Zoom Sessions Section.

@@ -49,7 +49,14 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
      * Execute the task.
      */
     public function execute() {
-        $this->execute_for_instance(null);
+        // Check for custom data (when run as adhoc task from webhook).
+        $customdata = $this->get_custom_data();
+        if (!empty($customdata->instance_id)) {
+            mtrace('YouTube sync triggered by webhook for instance: ' . $customdata->instance_id);
+            $this->execute_for_instance((int)$customdata->instance_id);
+        } else {
+            $this->execute_for_instance(null);
+        }
     }
 
     /**
@@ -102,10 +109,82 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
 
         mtrace('Processed ' . $processed . ' recordings.');
 
+        // Sync transcripts for uploaded videos that don't have them yet.
+        $this->sync_transcripts($instanceid);
+
         // Clean up old Zoom recordings.
         $this->cleanup_old_zoom_recordings();
 
         mtrace('Zoom to YouTube sync task completed.');
+    }
+
+    /**
+     * Sync transcripts from YouTube for uploaded videos.
+     *
+     * @param int|null $instanceid Specific zoom instance ID, or null for all.
+     */
+    protected function sync_transcripts(?int $instanceid = null) {
+        global $DB;
+
+        mtrace('Checking for videos needing transcript sync...');
+
+        // Find uploaded videos without transcripts.
+        $params = ['status' => 'uploaded', 'transcript_downloaded' => 0];
+        $instancesql = '';
+        if ($instanceid !== null) {
+            $instancesql = ' AND zoomid = :zoomid';
+            $params['zoomid'] = $instanceid;
+        }
+
+        $sql = "SELECT zyv.*, z.course
+                FROM {zoomyt_videos} zyv
+                JOIN {zoomyt} z ON z.id = zyv.zoomid
+                WHERE zyv.status = :status
+                  AND zyv.transcript_downloaded = :transcript_downloaded
+                  AND zyv.youtube_video_id IS NOT NULL
+                  {$instancesql}
+                ORDER BY zyv.timecreated DESC
+                LIMIT 10"; // Limit to avoid overloading.
+
+        $videos = $DB->get_records_sql($sql, $params);
+
+        if (empty($videos)) {
+            mtrace('No videos need transcript sync.');
+            return;
+        }
+
+        mtrace('Found ' . count($videos) . ' videos for transcript sync.');
+
+        foreach ($videos as $video) {
+            try {
+                // Get the course module for this zoom activity.
+                $cm = get_coursemodule_from_instance('zoomyt', $video->zoomid, $video->course);
+                if (!$cm) {
+                    continue;
+                }
+
+                // Get YouTube service for this activity.
+                $ytservice = \mod_zoomyt\youtube_service::get_instance_for_activity($video->zoomid);
+                if (!$ytservice || !$ytservice->is_configured()) {
+                    continue;
+                }
+
+                // Also sync metadata from YouTube.
+                $ytservice->sync_video_from_youtube($video->id);
+
+                // Download transcripts.
+                $result = $ytservice->download_and_store_transcripts($video->id, $cm->id);
+                if ($result) {
+                    mtrace('  Downloaded transcripts for video: ' . $video->title);
+                } else {
+                    // No transcripts available yet - mark as attempted so we don't keep trying.
+                    // YouTube may still be processing captions.
+                    mtrace('  No transcripts available yet for: ' . $video->title);
+                }
+            } catch (\Exception $e) {
+                mtrace('  Error syncing transcripts for video ' . $video->id . ': ' . $e->getMessage());
+            }
+        }
     }
 
     /**
@@ -158,8 +237,12 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
                 JOIN {zoomyt_meeting_details} zmd ON zmd.uuid = zmr.meetinguuid
                 LEFT JOIN {zoomyt_videos} zyv ON zyv.recordingid = zmr.id
                 WHERE zyv.id IS NULL
-                  AND zmr.recordingtype IN ('active_speaker', 'shared_screen_with_speaker_view', 
+                  AND (zmr.recordingtype IN ('active_speaker', 'shared_screen_with_speaker_view', 
                                              'shared_screen_with_gallery_view', 'gallery_view')
+                       OR zmr.recordingtype LIKE 'shared_screen_with_speaker_view%'
+                       OR zmr.recordingtype LIKE 'shared_screen_with_gallery_view%'
+                       OR zmr.recordingtype LIKE 'active_speaker%'
+                       OR zmr.recordingtype LIKE 'gallery_view%')
                   AND zmr.showrecording = 1
                   $instancefilter
                 ORDER BY zmr.recordingstart ASC";
@@ -178,6 +261,7 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
 
         // Select best recording for each meeting.
         $selected = [];
+        // Priority order for recording types (base types, variants like "(CC)" will match the base).
         $priority = ['active_speaker', 'shared_screen_with_speaker_view', 'shared_screen_with_gallery_view', 'gallery_view'];
 
         foreach ($bymeeting as $recordings) {
@@ -185,7 +269,14 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
             $bestpriority = 999;
 
             foreach ($recordings as $rec) {
-                $idx = array_search($rec->recordingtype, $priority);
+                // Check for exact match or prefix match (e.g., "shared_screen_with_speaker_view(CC)").
+                $idx = false;
+                foreach ($priority as $i => $type) {
+                    if ($rec->recordingtype === $type || strpos($rec->recordingtype, $type) === 0) {
+                        $idx = $i;
+                        break;
+                    }
+                }
                 if ($idx !== false && $idx < $bestpriority) {
                     $best = $rec;
                     $bestpriority = $idx;

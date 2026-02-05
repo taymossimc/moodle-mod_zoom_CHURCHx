@@ -52,7 +52,14 @@ class get_meeting_recordings extends scheduled_task {
      * @return void
      */
     public function execute() {
-        $this->execute_for_instance(null);
+        // Check for custom data (when run as adhoc task from webhook).
+        $customdata = $this->get_custom_data();
+        if (!empty($customdata->instance_id)) {
+            mtrace('Recording fetch triggered by webhook for instance: ' . $customdata->instance_id);
+            $this->execute_for_instance((int)$customdata->instance_id);
+        } else {
+            $this->execute_for_instance(null);
+        }
     }
 
     /**
@@ -122,17 +129,30 @@ class get_meeting_recordings extends scheduled_task {
 
         $hostmeetings = [];
 
+        // Get early access configuration to account for meetings that start before scheduled time.
+        $config = get_config('zoomyt');
+        $earlyaccessmins = (int)($config->hostearlyaccess ?? 15);
+        // Add buffer for meetings that might have been started early.
+        $earlystartwindow = max($earlyaccessmins, 30) * 60; // At least 30 minutes buffer.
+
         foreach ($localmeetings as $zoom) {
             // For manual sync (specific instance), always include the meeting.
-            // For scheduled task, only include if recurring or if the meeting start time has passed.
+            // For scheduled task, include if:
+            // - Recurring meetings (always have potential recordings)
+            // - Meeting start time has passed
+            // - Meeting is within the early access window (could have started early)
             if ($instanceid !== null) {
                 // Manual sync - always include.
                 $hostmeetings[$zoom->host_id][$zoom->meeting_id] = $zoom;
                 mtrace('Processing meeting: ' . $zoom->name . ' (ID: ' . $zoom->meeting_id . ')');
-            } else if ($zoom->recurring || $now > intval($zoom->start_time)) {
-                // Scheduled task - include if recurring or if the meeting has started.
-                // Note: We check start_time, not start_time + duration, because meetings can end early.
-                $hostmeetings[$zoom->host_id][$zoom->meeting_id] = $zoom;
+            } else {
+                $starttime = intval($zoom->start_time);
+                // Check if meeting could have started (now is past start_time OR within early access window).
+                $couldhavestartedyet = $now > ($starttime - $earlystartwindow);
+
+                if ($zoom->recurring || $couldhavestartedyet) {
+                    $hostmeetings[$zoom->host_id][$zoom->meeting_id] = $zoom;
+                }
             }
         }
 

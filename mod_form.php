@@ -324,8 +324,19 @@ class mod_zoomyt_mod_form extends moodleform_mod {
             // If we are creating a new instance.
             if ($isnew) {
                 // Check if the user has a webinar license.
-                $userfeatures = zoomyt_get_user_settings($zoomuserid)->feature;
-                $haswebinarlicense = !empty($userfeatures->webinar) || !empty($userfeatures->zoom_events);
+                // Wrap in try-catch in case the API call fails (e.g., missing scopes).
+                $haswebinarlicense = false;
+                try {
+                    $usersettings = zoomyt_get_user_settings($zoomuserid);
+                    if ($usersettings && isset($usersettings->feature)) {
+                        $userfeatures = $usersettings->feature;
+                        $haswebinarlicense = !empty($userfeatures->webinar) || !empty($userfeatures->zoom_events);
+                    }
+                } catch (\Exception $e) {
+                    // If we can't get user settings (e.g., missing API scopes), assume no webinar license.
+                    debugging('Could not get Zoom user settings: ' . $e->getMessage(), DEBUG_DEVELOPER);
+                    $haswebinarlicense = false;
+                }
 
                 // Only show if the admin always wants to show this widget or
                 // if the admin wants to show this widget conditionally and the user has a valid license.
@@ -501,7 +512,9 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         $mform->addHelpButton('requirepasscode', 'requirepasscode', 'zoomyt');
 
         // Set default passcode and description from Zoom security settings.
-        $securitysettings = zoomyt_get_meeting_security_settings($this->current->host_id ?? $zoomuserid);
+        // For new activities, always use the current user's Zoom ID, not a potentially stale host_id.
+        $hostidforlookup = (!$isnew && !empty($this->current->host_id)) ? $this->current->host_id : $zoomuserid;
+        $securitysettings = zoomyt_get_meeting_security_settings($hostidforlookup);
         // Add password.
         $mform->addElement('text', 'meetingcode', get_string('setpasscode', 'zoomyt'), ['maxlength' => '10']);
         $mform->setType('meetingcode', PARAM_TEXT);
@@ -674,7 +687,8 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         $mform->addHelpButton('option_mute_upon_entry', 'option_mute_upon_entry', 'mod_zoomyt');
 
         $hostuserid = $zoomuserid;
-        if (!empty($this->current->host_id)) {
+        // Only use the stored host_id for existing activities, not for new ones.
+        if (!$isnew && !empty($this->current->host_id)) {
             $hostuserid = $this->current->host_id;
         }
 
@@ -686,15 +700,23 @@ class mod_zoomyt_mod_form extends moodleform_mod {
                 ZOOM_AUTORECORDING_NONE => get_string('autorecording_none', 'mod_zoomyt'),
             ];
 
+            $recordingsettings = null;
             if (!empty($hostuserid)) {
-                $recordingsettings = zoomyt_get_user_settings($hostuserid)->recording;
+                try {
+                    $usersettings = zoomyt_get_user_settings($hostuserid);
+                    if ($usersettings && isset($usersettings->recording)) {
+                        $recordingsettings = $usersettings->recording;
+                    }
+                } catch (\Exception $e) {
+                    debugging('Could not get Zoom user settings for recording options: ' . $e->getMessage(), DEBUG_DEVELOPER);
+                }
             }
 
-            if (!empty($recordingsettings->local_recording)) {
+            if (!empty($recordingsettings) && !empty($recordingsettings->local_recording)) {
                 $options[ZOOM_AUTORECORDING_LOCAL] = get_string('autorecording_local', 'mod_zoomyt');
             }
 
-            if (!empty($recordingsettings->cloud_recording)) {
+            if (!empty($recordingsettings) && !empty($recordingsettings->cloud_recording)) {
                 $options[ZOOM_AUTORECORDING_CLOUD] = get_string('autorecording_cloud', 'mod_zoomyt');
             }
 
@@ -910,10 +932,15 @@ class mod_zoomyt_mod_form extends moodleform_mod {
             $scheduleforuser = current($values);
             $zoomuser = zoomyt_get_user($scheduleforuser);
             $zoomuserid = $zoomuser->id;
-        } else if (!empty($this->current->host_id)) {
-            $zoomuserid = $this->current->host_id;
         } else {
-            $zoomuserid = zoomyt_get_user_id(false);
+            // For new activities or if no host_id is stored, use the current user's Zoom ID.
+            // Check if this is an existing activity with a valid host_id.
+            $isnew = empty($this->_cm);
+            if (!$isnew && !empty($this->current->host_id)) {
+                $zoomuserid = $this->current->host_id;
+            } else {
+                $zoomuserid = zoomyt_get_user_id(false);
+            }
         }
 
         $recordingelement =& $mform->getElement('option_auto_recording');
@@ -924,15 +951,23 @@ class mod_zoomyt_mod_form extends moodleform_mod {
             ZOOM_AUTORECORDING_NONE => get_string('autorecording_none', 'mod_zoomyt'),
         ];
 
+        $recordingsettings = null;
         if ($zoomuserid !== false) {
-            $recordingsettings = zoomyt_get_user_settings($zoomuserid)->recording;
+            try {
+                $usersettings = zoomyt_get_user_settings($zoomuserid);
+                if ($usersettings && isset($usersettings->recording)) {
+                    $recordingsettings = $usersettings->recording;
+                }
+            } catch (\Exception $e) {
+                debugging('Could not get Zoom user settings: ' . $e->getMessage(), DEBUG_DEVELOPER);
+            }
         }
 
-        if (!empty($recordingsettings->local_recording)) {
+        if (!empty($recordingsettings) && !empty($recordingsettings->local_recording)) {
             $options[ZOOM_AUTORECORDING_LOCAL] = get_string('autorecording_local', 'mod_zoomyt');
         }
 
-        if (!empty($recordingsettings->cloud_recording)) {
+        if (!empty($recordingsettings) && !empty($recordingsettings->cloud_recording)) {
             $options[ZOOM_AUTORECORDING_CLOUD] = get_string('autorecording_cloud', 'mod_zoomyt');
         }
 

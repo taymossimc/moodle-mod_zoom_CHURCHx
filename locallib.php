@@ -1463,17 +1463,119 @@ function zoomyt_get_course_instructor_emails($courseid, $excludeuserid = null) {
 }
 
 /**
+ * Check if a user exists on the Zoom account.
+ *
+ * @param string $email The user's email address.
+ * @return bool True if the user exists on Zoom.
+ */
+function zoomyt_user_exists_on_zoom($email) {
+    try {
+        $user = zoomyt_webservice()->get_user($email);
+        return !empty($user);
+    } catch (\mod_zoomyt\not_found_exception $e) {
+        return false;
+    } catch (moodle_exception $e) {
+        // For other errors (network, auth, etc), assume user doesn't exist to be safe.
+        debugging("ZOOMYT: Error checking Zoom user {$email}: " . $e->getMessage(), DEBUG_DEVELOPER);
+        return false;
+    }
+}
+
+/**
+ * Ensure a Moodle user exists on the Zoom account, creating them and assigning a license if needed.
+ *
+ * If the admin setting 'autocreatezoomusers' is enabled, users who don't have a Zoom
+ * account will be automatically added to the Zoom account. They are initially created
+ * as Basic users, and then the license recycling logic (provide_license) is used to
+ * upgrade them to Pro by freeing up a license from the least recently active paid user
+ * if necessary.
+ *
+ * @param string $email The user's email address.
+ * @param int $courseid The course ID (to look up the Moodle user).
+ * @return bool True if the user exists (or was created) on Zoom.
+ */
+function zoomyt_ensure_zoom_user($email, $courseid) {
+    global $DB;
+
+    $service = zoomyt_webservice();
+
+    // First check if user already exists on Zoom.
+    $existinguser = null;
+    try {
+        $existinguser = $service->get_user($email);
+    } catch (\mod_zoomyt\not_found_exception $e) {
+        // User doesn't exist - this is expected, we'll create them below.
+        $existinguser = null;
+    } catch (moodle_exception $e) {
+        debugging("ZOOMYT: Error checking Zoom user {$email}: " . $e->getMessage(), DEBUG_DEVELOPER);
+        return false;
+    }
+
+    if (!empty($existinguser)) {
+        // User exists on Zoom. Ensure they have a license via the recycling logic.
+        $zoomuserid = $existinguser->id;
+        try {
+            $service->provide_license($zoomuserid);
+            debugging("ZOOMYT: Existing Zoom user {$email} - ensured license is assigned.", DEBUG_DEVELOPER);
+        } catch (\Exception $e) {
+            debugging("ZOOMYT: Could not assign license to {$email}: " . $e->getMessage(), DEBUG_DEVELOPER);
+        }
+        return true;
+    }
+
+    // Check if auto-creating users is enabled.
+    $config = get_config('zoomyt');
+    if (empty($config->autocreatezoomusers)) {
+        debugging("ZOOMYT: User {$email} not on Zoom and auto-create is disabled.", DEBUG_DEVELOPER);
+        return false;
+    }
+
+    // User doesn't exist - try to add them to the Zoom account.
+    // Look up the Moodle user record to get their name.
+    $moodleuser = $DB->get_record('user', ['email' => $email], 'id, email, firstname, lastname');
+    if (!$moodleuser) {
+        debugging("ZOOMYT: Cannot add {$email} to Zoom - no matching Moodle user found.", DEBUG_DEVELOPER);
+        return false;
+    }
+
+    try {
+        // Create as Basic first (autoCreate sends an invite/adds to account).
+        $service->autocreate_user($moodleuser, 'autoCreate', ZOOM_USER_TYPE_BASIC);
+        debugging("ZOOMYT: Created Zoom user for {$email}", DEBUG_DEVELOPER);
+
+        // Now upgrade them to Pro using the license recycling logic.
+        // We need to fetch the newly created user to get their Zoom user ID.
+        $newuser = $service->get_user($email);
+        if (!empty($newuser)) {
+            $service->provide_license($newuser->id);
+            debugging("ZOOMYT: Assigned Pro license to new Zoom user {$email}", DEBUG_DEVELOPER);
+        }
+
+        return true;
+    } catch (moodle_exception $e) {
+        // Check if error indicates user already exists (race condition).
+        if (strpos($e->getMessage(), 'already in the account') !== false) {
+            return true;
+        }
+        debugging("ZOOMYT: Failed to create Zoom user for {$email}: " . $e->getMessage(), DEBUG_DEVELOPER);
+        return false;
+    }
+}
+
+/**
  * Merge instructor emails into the existing alternative hosts list.
  *
  * This function takes an existing alternative hosts string and merges in
- * instructor emails, avoiding duplicates. It optionally excludes specified emails.
+ * instructor emails, avoiding duplicates. It validates each instructor against
+ * the Zoom account and optionally creates them as Basic users if they don't exist.
  *
  * @param string $existinghosts Comma-separated string of existing alternative host emails.
  * @param array $instructoremails Array of instructor email addresses to add.
  * @param string|null $hostemail Optional host email to exclude from the list.
+ * @param int|null $courseid Optional course ID for creating Zoom users.
  * @return string Updated comma-separated string of alternative host emails.
  */
-function zoomyt_merge_alternative_hosts($existinghosts, array $instructoremails, $hostemail = null) {
+function zoomyt_merge_alternative_hosts($existinghosts, array $instructoremails, $hostemail = null, $courseid = null) {
     // Parse existing hosts.
     $existingemails = zoomyt_get_alternative_host_array_from_string($existinghosts);
 
@@ -1481,12 +1583,43 @@ function zoomyt_merge_alternative_hosts($existinghosts, array $instructoremails,
     $existingemails = array_map('strtolower', $existingemails);
     $instructoremails = array_map('strtolower', $instructoremails);
 
-    // Merge the lists.
-    $allhosts = array_unique(array_merge($existingemails, $instructoremails));
-
     // Remove the host email if specified (host can't be alternative host of their own meeting).
+    $hostemail = $hostemail !== null ? strtolower($hostemail) : null;
+
+    // Validate instructor emails against Zoom - only add those who exist (or can be created).
+    $validinstructors = [];
+    foreach ($instructoremails as $email) {
+        // Skip the host email.
+        if ($hostemail !== null && $email === $hostemail) {
+            continue;
+        }
+        // Skip if already in the existing list.
+        if (in_array($email, $existingemails)) {
+            continue;
+        }
+        // Ensure the user exists on Zoom (create as Basic if needed).
+        if ($courseid !== null) {
+            if (zoomyt_ensure_zoom_user($email, $courseid)) {
+                $validinstructors[] = $email;
+                debugging("ZOOMYT: Validated Zoom user for alternative host: {$email}", DEBUG_DEVELOPER);
+            } else {
+                debugging("ZOOMYT: Skipping {$email} - not a valid Zoom user and could not be created.", DEBUG_DEVELOPER);
+            }
+        } else {
+            // No course ID provided - can't create users, just try to validate.
+            if (zoomyt_user_exists_on_zoom($email)) {
+                $validinstructors[] = $email;
+            } else {
+                debugging("ZOOMYT: Skipping {$email} - not a valid Zoom user.", DEBUG_DEVELOPER);
+            }
+        }
+    }
+
+    // Merge the lists.
+    $allhosts = array_unique(array_merge($existingemails, $validinstructors));
+
+    // Remove the host email.
     if ($hostemail !== null) {
-        $hostemail = strtolower($hostemail);
         $allhosts = array_filter($allhosts, function($email) use ($hostemail) {
             return $email !== $hostemail;
         });

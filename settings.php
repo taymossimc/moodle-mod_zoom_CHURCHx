@@ -384,6 +384,17 @@ if ($ADMIN->fulltree) {
     );
     $settings->add($autoaddinstructors);
 
+    // Auto-create Zoom users for instructors who don't have Zoom accounts.
+    $autocreateusers = new admin_setting_configcheckbox(
+        'zoomyt/autocreatezoomusers',
+        get_string('autocreatezoomusers', 'mod_zoomyt'),
+        get_string('autocreatezoomusers_desc', 'mod_zoomyt'),
+        1,
+        1,
+        0
+    );
+    $settings->add($autocreateusers);
+
     $capacitywarningchoices = [
         ZOOM_CAPACITYWARNING_DISABLE => get_string('meetingcapacitywarning_disable', 'mod_zoomyt'),
         ZOOM_CAPACITYWARNING_ENABLE => get_string('meetingcapacitywarning_enable', 'mod_zoomyt'),

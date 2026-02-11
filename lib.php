@@ -115,9 +115,9 @@ function zoomyt_add_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = null)
             $hostemail = zoomyt_get_api_identifier($USER);
         }
 
-        // Merge with any existing alternative hosts.
+        // Merge with any existing alternative hosts (validates against Zoom, creates Basic users if needed).
         $existinghosts = $zoom->alternative_hosts ?? '';
-        $zoom->alternative_hosts = zoomyt_merge_alternative_hosts($existinghosts, $instructoremails, $hostemail);
+        $zoom->alternative_hosts = zoomyt_merge_alternative_hosts($existinghosts, $instructoremails, $hostemail, $zoom->course);
 
         debugging("ZOOMYT: Auto-added instructors as alternative hosts: {$zoom->alternative_hosts}", DEBUG_DEVELOPER);
     }
@@ -244,9 +244,9 @@ function zoomyt_update_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = nu
             }
         }
 
-        // Merge with any existing alternative hosts.
+        // Merge with any existing alternative hosts (validates against Zoom, creates Basic users if needed).
         $existinghosts = $zoom->alternative_hosts ?? $updatedzoomrecord->alternative_hosts ?? '';
-        $zoom->alternative_hosts = zoomyt_merge_alternative_hosts($existinghosts, $instructoremails, $hostemail);
+        $zoom->alternative_hosts = zoomyt_merge_alternative_hosts($existinghosts, $instructoremails, $hostemail, $zoom->course);
 
         // Save the updated alternative hosts to the database so it appears in the form.
         $DB->set_field('zoomyt', 'alternative_hosts', $zoom->alternative_hosts, ['id' => $zoom->id]);

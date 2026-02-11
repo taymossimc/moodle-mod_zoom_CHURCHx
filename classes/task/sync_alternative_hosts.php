@@ -103,9 +103,9 @@ class sync_alternative_hosts extends scheduled_task {
                     }
                 }
 
-                // Merge with existing alternative hosts.
+                // Merge with existing alternative hosts (validates against Zoom, creates Basic users if needed).
                 $existinghosts = $zoom->alternative_hosts ?? '';
-                $newhosts = zoomyt_merge_alternative_hosts($existinghosts, $instructoremails, $hostemail);
+                $newhosts = zoomyt_merge_alternative_hosts($existinghosts, $instructoremails, $hostemail, $zoom->course);
 
                 // Check if anything changed.
                 if ($newhosts === $existinghosts) {

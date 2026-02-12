@@ -1450,7 +1450,19 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         // Disable if completion is disabled.
         $mform->disabledIf('completionattendance', 'completion', 'eq', COMPLETION_DISABLED);
 
-        return ['completionattendancegroup'];
+        // Minimum video watch percentage for completion.
+        $group2 = [];
+        $group2[] = $mform->createElement('text', 'completionwatchpercent', '', ['size' => 5]);
+        $group2[] = $mform->createElement('static', 'completionwatchpercentlabel', '', '%');
+        $mform->addGroup($group2, 'completionwatchpercentgroup', get_string('completionwatchpercent', 'zoomyt'), ' ', false);
+        $mform->setType('completionwatchpercent', PARAM_INT);
+        $mform->addHelpButton('completionwatchpercentgroup', 'completionwatchpercent', 'zoomyt');
+        $mform->setDefault('completionwatchpercent', 0);
+
+        // Disable if completion is disabled.
+        $mform->disabledIf('completionwatchpercent', 'completion', 'eq', COMPLETION_DISABLED);
+
+        return ['completionattendancegroup', 'completionwatchpercentgroup'];
     }
 
     /**
@@ -1460,7 +1472,7 @@ class mod_zoomyt_mod_form extends moodleform_mod {
      * @return bool True if one or more rules is enabled, false if none are.
      */
     public function completion_rule_enabled($data) {
-        return !empty($data['completionattendance']);
+        return !empty($data['completionattendance']) || !empty($data['completionwatchpercent']);
     }
 
     /**
@@ -1477,6 +1489,13 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         // Ensure completionattendance is set.
         if (empty($data->completionattendance)) {
             $data->completionattendance = 0;
+        }
+
+        // Ensure completionwatchpercent is set and valid.
+        if (empty($data->completionwatchpercent)) {
+            $data->completionwatchpercent = 0;
+        } else {
+            $data->completionwatchpercent = min(100, max(0, (int)$data->completionwatchpercent));
         }
 
         return $data;

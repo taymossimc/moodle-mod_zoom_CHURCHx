@@ -101,6 +101,24 @@ class video_gallery implements renderable, templatable {
             $item->status = $video->status;
             $item->embed_url = 'https://www.youtube.com/embed/' . $video->youtube_video_id;
             $item->caption_languages = $video->caption_languages ?? '';
+            $item->duration_seconds = (int)$video->duration;
+
+            // Build transcript URLs for ALL available languages.
+            $item->transcript_urls = [];
+            $item->transcript_url = '';  // Default/preferred language URL.
+            if (!empty($video->transcript_downloaded) && !empty($video->caption_languages)) {
+                $context = \context_module::instance($this->cmid);
+                $langs = array_filter(array_map('trim', explode(',', $video->caption_languages)));
+                foreach ($langs as $lang) {
+                    $url = (new \moodle_url('/pluginfile.php/' . $context->id .
+                        '/mod_zoomyt/transcripts/' . $video->id . '/transcript_' . $lang . '.srt'))->out(false);
+                    $item->transcript_urls[$lang] = $url;
+                }
+                // Default URL will be selected by JS based on user language preference.
+                if (!empty($langs[0])) {
+                    $item->transcript_url = $item->transcript_urls[$langs[0]];
+                }
+            }
 
             $result[] = $item;
         }
@@ -164,6 +182,11 @@ class video_gallery implements renderable, templatable {
         $data->viewmode = $this->viewmode;
         $data->videocount = count($this->videos);
         $data->showastile = (count($this->videos) > 1 && $this->viewmode === 'tile');
+
+        // Pass user's preferred language (2-letter code) for audio/transcript auto-selection.
+        $currentlang = current_language();
+        // Moodle languages can be like 'en', 'fr', 'es', 'pt_br' etc. Extract the 2-letter prefix.
+        $data->userlang = substr($currentlang, 0, 2);
 
         return $data;
     }

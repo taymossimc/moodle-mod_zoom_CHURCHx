@@ -552,6 +552,7 @@ $string['view_on_youtube'] = 'Ver en YouTube';
 $string['session_date'] = 'Fecha de sesión';
 $string['video_duration'] = 'Duración';
 $string['toggle_video_visibility'] = 'Alternar visibilidad';
+$string['visibility'] = 'Visibilidad';
 $string['video_visible'] = 'Visible para estudiantes';
 $string['video_hidden'] = 'Oculto a estudiantes';
 $string['video_updated'] = 'Video actualizado exitosamente';
@@ -624,6 +625,21 @@ $string['inherit_youtube_settings_help'] = 'Cuando está habilitado, esta catego
 $string['completionattendance'] = 'Requerir duración de asistencia';
 $string['completionattendance_help'] = 'Número mínimo de minutos que el participante debe asistir a la reunión para completar esta actividad. Establezca en 0 para desactivar este requisito.';
 $string['completionattendance_desc'] = 'Asistir al menos {$a} minutos';
+$string['completionwatchpercent'] = 'Requerir porcentaje de visualización de video';
+$string['completionwatchpercent_help'] = 'Porcentaje mínimo del video que el estudiante debe ver para completar esta actividad. El sistema rastrea el tiempo de reproducción acumulado. Establezca en 0 para desactivar. Esto funciona como una alternativa al requisito de duración de asistencia: un estudiante puede completar la actividad asistiendo a la sesión en vivo O viendo la grabación.';
+$string['completionwatchpercent_desc'] = 'Ver al menos {$a}% de la grabación de video';
+
+// Cadenas del reproductor de video.
+$string['rewind30'] = 'Retroceder 30 segundos';
+$string['forward30'] = 'Avanzar 30 segundos';
+$string['prevchapter'] = 'Capítulo anterior';
+$string['nextchapter'] = 'Capítulo siguiente';
+$string['searchtranscript'] = 'Buscar en la transcripción';
+$string['notranscriptavailable'] = 'No hay transcripción disponible';
+$string['loadingtranscript'] = 'Cargando transcripción...';
+$string['watchprogress'] = 'Progreso de visualización';
+$string['resumefrom'] = 'Reanudar desde {$a}';
+$string['transcriptlanguage'] = 'Idioma de la transcripción';
 
 // Cadenas de YouTube a nivel de actividad.
 $string['youtube_activity_header'] = 'Integración de YouTube';

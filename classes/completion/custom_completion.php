@@ -30,6 +30,10 @@ require_once($CFG->dirroot . '/mod/zoomyt/lib.php');
  * Contains the class for defining mod_zoomyt's custom completion rules
  * and fetching the completion statuses of the custom completion rules.
  *
+ * Supports two completion criteria (OR logic):
+ * - completionattendance: Minimum live meeting attendance duration in minutes.
+ * - completionwatchpercent: Minimum video watch percentage (0-100).
+ *
  * @package    mod_zoomyt
  * @copyright  2025
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -56,7 +60,34 @@ class custom_completion extends activity_custom_completion {
             return ($totalduration >= $requiredseconds) ? COMPLETION_COMPLETE : COMPLETION_INCOMPLETE;
         }
 
+        if ($rule === 'completionwatchpercent') {
+            // Get the best watch percentage across all videos for this activity.
+            $bestpercent = $this->get_user_best_watch_percent($zoom->id, $this->userid);
+
+            return ($bestpercent >= $zoom->completionwatchpercent) ? COMPLETION_COMPLETE : COMPLETION_INCOMPLETE;
+        }
+
         return COMPLETION_INCOMPLETE;
+    }
+
+    /**
+     * Get the best video watch percentage for a user across all videos in an activity.
+     *
+     * @param int $zoomid The zoom activity ID.
+     * @param int $userid The user ID.
+     * @return int Best watch percentage (0-100).
+     */
+    protected function get_user_best_watch_percent(int $zoomid, int $userid): int {
+        global $DB;
+
+        $sql = "SELECT MAX(vp.percentcomplete) as bestpercent
+                FROM {zoomyt_video_progress} vp
+                JOIN {zoomyt_videos} v ON v.id = vp.videoid
+                WHERE v.zoomid = ? AND vp.userid = ?";
+
+        $result = $DB->get_field_sql($sql, [$zoomid, $userid]);
+
+        return (int)($result ?? 0);
     }
 
     /**
@@ -65,7 +96,7 @@ class custom_completion extends activity_custom_completion {
      * @return array
      */
     public static function get_defined_custom_rules(): array {
-        return ['completionattendance'];
+        return ['completionattendance', 'completionwatchpercent'];
     }
 
     /**
@@ -88,6 +119,14 @@ class custom_completion extends activity_custom_completion {
             );
         }
 
+        if (!empty($zoom->completionwatchpercent)) {
+            $descriptions['completionwatchpercent'] = get_string(
+                'completionwatchpercent_desc',
+                'zoomyt',
+                $zoom->completionwatchpercent
+            );
+        }
+
         return $descriptions;
     }
 
@@ -100,6 +139,7 @@ class custom_completion extends activity_custom_completion {
         return [
             'completionview',
             'completionattendance',
+            'completionwatchpercent',
         ];
     }
 }

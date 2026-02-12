@@ -218,7 +218,7 @@ if (empty($videos)) {
         get_string('session_date', 'zoomyt'),
         get_string('youtube_status', 'zoomyt'),
         get_string('transcript', 'zoomyt'),
-        get_string('visibility'),
+        get_string('visibility', 'zoomyt'),
         get_string('actions'),
     ];
     $table->attributes['class'] = 'table table-striped';

@@ -275,7 +275,12 @@ if ($gallerydata->hasvideos || $iszoommanager) {
     echo $OUTPUT->box_end();
 }
 
-if ($zoom->show_schedule) {
+// Show schedule section: hide for students if non-recurring meeting has finished.
+$showschedule = $zoom->show_schedule;
+if (!$iszoommanager && !$zoom->recurring && $finished) {
+    $showschedule = false;
+}
+if ($showschedule) {
     echo $OUTPUT->box_start('', 'zoom_section-schedule');
     // Output "Schedule" heading.
     echo $OUTPUT->heading(get_string('schedule', 'mod_zoomyt'), 3);
@@ -463,7 +468,8 @@ if ($zoom->show_schedule) {
     echo $OUTPUT->box_end();
 }
 
-if ($zoom->show_security) {
+// Security section: only visible to managers/teachers.
+if ($zoom->show_security && $iszoommanager) {
     echo $OUTPUT->box_start('', 'zoom_section-security');
     // Output "Security" heading.
     echo $OUTPUT->heading(get_string('security', 'mod_zoomyt'), 3);
@@ -558,7 +564,8 @@ if ($zoom->show_security) {
     echo $OUTPUT->box_end();
 }
 
-if ($zoom->show_media) {
+// Media section: only visible to managers/teachers.
+if ($zoom->show_media && $iszoommanager) {
     echo $OUTPUT->box_start('', 'zoom_section-media');
     // Output "Media" heading.
     echo $OUTPUT->heading(get_string('media', 'mod_zoomyt'), 3);

@@ -634,6 +634,7 @@ $string['view_on_youtube'] = 'View on YouTube';
 $string['session_date'] = 'Session date';
 $string['video_duration'] = 'Duration';
 $string['toggle_video_visibility'] = 'Toggle visibility';
+$string['visibility'] = 'Visibility';
 $string['video_visible'] = 'Visible to students';
 $string['video_hidden'] = 'Hidden from students';
 $string['video_updated'] = 'Video updated successfully';
@@ -679,6 +680,21 @@ $string['activity_video_visibility_help'] = 'Whether videos uploaded from this a
 $string['completionattendance'] = 'Require attendance duration';
 $string['completionattendance_help'] = 'Minimum number of minutes the participant must attend the meeting to complete this activity. Set to 0 to disable this requirement.';
 $string['completionattendance_desc'] = 'Attend for at least {$a} minutes';
+$string['completionwatchpercent'] = 'Require video watch percentage';
+$string['completionwatchpercent_help'] = 'Minimum percentage of the video the student must watch to complete this activity. The system tracks accumulated play time. Set to 0 to disable this requirement. This works as an alternative to the attendance duration requirement - a student can complete the activity by either attending the live session OR watching the recording.';
+$string['completionwatchpercent_desc'] = 'Watch at least {$a}% of the video recording';
+
+// Video player strings.
+$string['rewind30'] = 'Rewind 30 seconds';
+$string['forward30'] = 'Forward 30 seconds';
+$string['prevchapter'] = 'Previous chapter';
+$string['nextchapter'] = 'Next chapter';
+$string['searchtranscript'] = 'Search transcript';
+$string['notranscriptavailable'] = 'No transcript available';
+$string['loadingtranscript'] = 'Loading transcript...';
+$string['watchprogress'] = 'Watch progress';
+$string['resumefrom'] = 'Resume from {$a}';
+$string['transcriptlanguage'] = 'Transcript language';
 
 // Activity-level YouTube strings.
 $string['youtube_activity_header'] = 'YouTube Integration';

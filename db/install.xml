@@ -49,6 +49,7 @@
         <FIELD NAME="option_auto_recording" TYPE="char" LENGTH="5" NOTNULL="false" SEQUENCE="false" COMMENT="Auto record meeting."/>
         <FIELD NAME="registration" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="2" SEQUENCE="false" COMMENT="Force participants to register for the meeting/webinar"/>
         <FIELD NAME="completionattendance" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Minimum attendance duration in minutes for completion"/>
+        <FIELD NAME="completionwatchpercent" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Minimum video watch percentage for completion (0-100, 0 = disabled)"/>
         <FIELD NAME="joinbeforestart" TYPE="int" LENGTH="5" NOTNULL="false" SEQUENCE="false" COMMENT="Minutes before start time that participants can join. NULL means use global/category default."/>
         <FIELD NAME="yt_use_category" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="Use category/site YouTube channel settings (1) or activity-specific (0)"/>
         <FIELD NAME="yt_channel_id" TYPE="char" LENGTH="50" NOTNULL="false" SEQUENCE="false" COMMENT="Activity-specific YouTube channel ID"/>
@@ -291,6 +292,24 @@
       <INDEXES>
         <INDEX NAME="userid_idx" UNIQUE="false" FIELDS="userid"/>
       </INDEXES>
+    </TABLE>
+    <TABLE NAME="zoomyt_video_progress" COMMENT="Tracks per-user video watch progress for completion tracking.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="videoid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Link to zoomyt_videos table."/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="User who watched the video."/>
+        <FIELD NAME="watchedseconds" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Total accumulated play time in seconds."/>
+        <FIELD NAME="videoduration" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Video duration in seconds from YouTube."/>
+        <FIELD NAME="percentcomplete" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Calculated watch percentage (0-100)."/>
+        <FIELD NAME="lastposition" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Last known playback position in seconds."/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="12" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="12" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="id_primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="fk_videoid" TYPE="foreign" FIELDS="videoid" REFTABLE="zoomyt_videos" REFFIELDS="id"/>
+        <KEY NAME="videoid_userid_unique" TYPE="unique" FIELDS="videoid, userid"/>
+      </KEYS>
     </TABLE>
   </TABLES>
 </XMLDB>

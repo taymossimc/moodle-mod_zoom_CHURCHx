@@ -1027,6 +1027,48 @@ function zoomyt_load_meeting($id, $context, $usestarturl = true) {
     $userishost = ($userisrealhost || in_array($userapiidentifier, $alternativehosts, true));
     $isteacher = has_capability('mod/zoomyt:addinstance', $context);
 
+    // If user is a teacher but not yet a host, provision them on-the-fly.
+    // This catches the gap between activity creation and the next cron sync.
+    if ($isteacher && !$userishost) {
+        $config = get_config('zoomyt');
+        if (!empty($config->autoaddinstructorsashosts)) {
+            $teacheremail = strtolower($USER->email);
+            debugging("ZOOMYT: Teacher {$teacheremail} joining but not yet an alternative host. Provisioning on-the-fly.", DEBUG_DEVELOPER);
+
+            // Ensure the teacher has a Zoom account (create + assign license if needed).
+            if (zoomyt_ensure_zoom_user($teacheremail, $zoom->course)) {
+                // Add them as an alternative host on this meeting.
+                $existinghosts = $zoom->alternative_hosts ?? '';
+                $hostemail = null;
+                if (!empty($zoom->host_id)) {
+                    try {
+                        $hostuser = zoomyt_get_user($zoom->host_id);
+                        $hostemail = $hostuser->email ?? null;
+                    } catch (moodle_exception $e) {
+                        // Ignore.
+                    }
+                }
+
+                $newhosts = zoomyt_merge_alternative_hosts($existinghosts, [$teacheremail], $hostemail, $zoom->course);
+
+                if ($newhosts !== $existinghosts) {
+                    // Update on Zoom.
+                    if (zoomyt_update_meeting_alternative_hosts($zoom, $newhosts)) {
+                        // Update local DB.
+                        $DB->set_field('zoomyt', 'alternative_hosts', $newhosts, ['id' => $zoom->id]);
+                        $zoom->alternative_hosts = $newhosts;
+
+                        // Re-evaluate host status.
+                        $alternativehosts = zoomyt_get_alternative_host_array_from_string($newhosts);
+                        $userishost = ($userisrealhost || in_array($userapiidentifier, $alternativehosts, true));
+
+                        debugging("ZOOMYT: Teacher {$teacheremail} provisioned as alternative host on-the-fly. userishost={$userishost}", DEBUG_DEVELOPER);
+                    }
+                }
+            }
+        }
+    }
+
     // Get meeting state with user role context.
     [$inprogress, $available, $finished] = zoomyt_get_state($zoom, $userishost, $isteacher);
 
@@ -1138,7 +1180,16 @@ function zoomyt_load_meeting($id, $context, $usestarturl = true) {
     if ($userishost) {
         $config = get_config('zoomyt');
         if (!empty($config->recycleonjoin)) {
+            // Provide license to the meeting's original host.
             zoomyt_webservice()->provide_license($zoom->host_id);
+
+            // Also provide license to the current user if they're an alternative host.
+            if (!$userisrealhost) {
+                $currentuserzoomid = zoomyt_get_user_id(false);
+                if ($currentuserzoomid) {
+                    zoomyt_webservice()->provide_license($currentuserzoomid);
+                }
+            }
         }
     }
 

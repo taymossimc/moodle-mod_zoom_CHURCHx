@@ -140,20 +140,68 @@
         </table>
     </div>
 
-    {{! Video Player Modal }}
+    {{! Enhanced Video Player Modal }}
     <div class="modal fade" id="videoPlayerModal" tabindex="-1" role="dialog" aria-labelledby="videoPlayerTitle" aria-hidden="true">
-        <div class="modal-dialog modal-xl modal-dialog-centered" role="document" style="max-width: 90vw; margin: auto;">
+        <div class="modal-dialog modal-xl modal-dialog-centered" role="document">
             <div class="modal-content">
-                <div class="modal-header">
+                <div class="modal-header py-2">
                     <h5 class="modal-title" id="videoPlayerTitle"></h5>
                     <button type="button" class="close" data-dismiss="modal" aria-label="Close">
                         <span aria-hidden="true">&times;</span>
                     </button>
                 </div>
                 <div class="modal-body p-0">
-                    <div class="embed-responsive embed-responsive-16by9">
-                        <iframe id="videoPlayerFrame" class="embed-responsive-item" 
-                                src="" allowfullscreen allow="autoplay"></iframe>
+                    <div class="d-flex vp-main-container">
+                        {{! Left: Video + Controls }}
+                        <div class="vp-video-col">
+                            <div class="vp-player-wrapper">
+                                <div id="ytplayer"></div>
+                            </div>
+                            {{! Custom Controls Bar }}
+                            <div class="vp-controls">
+                                <button class="btn btn-sm btn-dark vp-ctrl-btn" id="vpRewind30" title="Rewind 30s">
+                                    <i class="fa fa-undo"></i> 30s
+                                </button>
+                                <button class="btn btn-sm btn-dark vp-ctrl-btn" id="vpPrevChapter" title="Previous chapter">
+                                    <i class="fa fa-step-backward"></i>
+                                </button>
+                                <span class="vp-time-display" id="vpTimeDisplay">0:00 / 0:00</span>
+                                <button class="btn btn-sm btn-dark vp-ctrl-btn" id="vpNextChapter" title="Next chapter">
+                                    <i class="fa fa-step-forward"></i>
+                                </button>
+                                <button class="btn btn-sm btn-dark vp-ctrl-btn" id="vpForward30" title="Forward 30s">
+                                    30s <i class="fa fa-repeat"></i>
+                                </button>
+                            </div>
+                        </div>
+                        {{! Right: Transcript Panel }}
+                        <div class="vp-transcript-col" id="vpTranscriptCol">
+                            <div class="vp-transcript-header">
+                                <div class="vp-transcript-search">
+                                    <div class="input-group input-group-sm">
+                                        <input type="text" class="form-control" id="vpSearchInput" placeholder="Search transcript...">
+                                        <div class="input-group-append">
+                                            <span class="input-group-text vp-match-count" id="vpMatchCount"></span>
+                                            <button class="btn btn-outline-secondary" id="vpSearchPrev" title="Previous match">
+                                                <i class="fa fa-chevron-up"></i>
+                                            </button>
+                                            <button class="btn btn-outline-secondary" id="vpSearchNext" title="Next match">
+                                                <i class="fa fa-chevron-down"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="vp-transcript-lang-selector d-none" id="vpLangSelector">
+                                    <select class="form-control form-control-sm" id="vpLangSelect" title="Transcript language">
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="vp-transcript-body" id="vpTranscriptBody">
+                                <div class="vp-transcript-loading text-center text-muted p-3">
+                                    <i class="fa fa-spinner fa-spin"></i> Loading transcript...
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -169,32 +217,169 @@
 </div>
 
 <style>
-/* Video Player Modal - Force Center (accounting for navbar) */
+/* ===== Video Player Modal ===== */
 #videoPlayerModal .modal-dialog {
     position: fixed !important;
-    top: calc(50% + 30px) !important;  /* Offset for navbar */
+    top: calc(50% + 30px) !important;
     left: 50% !important;
     transform: translate(-50%, -50%) !important;
     margin: 0 !important;
-    max-width: 85vw !important;
-    width: 85vw !important;
-    max-height: calc(90vh - 60px) !important;  /* Reduced height for navbar */
+    max-width: 92vw !important;
+    width: 92vw !important;
+    max-height: calc(92vh - 60px) !important;
 }
 #videoPlayerModal .modal-content {
-    max-height: calc(90vh - 60px);
+    max-height: calc(92vh - 60px);
     overflow: hidden;
 }
 #videoPlayerModal .modal-body {
     padding: 0;
 }
-#videoPlayerModal .embed-responsive {
-    background: #000;
-}
-/* Ensure modal backdrop doesn't interfere with navbar */
 #videoPlayerModal {
-    padding-top: 60px !important;  /* Space for navbar */
+    padding-top: 60px !important;
 }
 
+/* Main container: video left, transcript right */
+.vp-main-container {
+    height: calc(92vh - 160px);
+    min-height: 400px;
+}
+.vp-video-col {
+    flex: 7;
+    display: flex;
+    flex-direction: column;
+    background: #000;
+    min-width: 0;
+}
+.vp-transcript-col {
+    flex: 3;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid #dee2e6;
+    background: #f8f9fa;
+    min-width: 250px;
+    max-width: 380px;
+}
+/* Hide transcript panel when no transcript */
+.vp-transcript-col.vp-no-transcript {
+    display: none;
+}
+.vp-transcript-col.vp-no-transcript ~ .vp-video-col,
+.vp-no-transcript + .vp-video-col {
+    flex: 1;
+}
+
+/* Player area */
+.vp-player-wrapper {
+    flex: 1;
+    position: relative;
+    min-height: 0;
+}
+.vp-player-wrapper iframe,
+.vp-player-wrapper > div {
+    width: 100% !important;
+    height: 100% !important;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+/* Controls bar */
+.vp-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: #1a1a1a;
+    flex-shrink: 0;
+}
+.vp-ctrl-btn {
+    font-size: 0.8rem;
+    padding: 3px 10px;
+    border-radius: 4px;
+}
+.vp-time-display {
+    color: #ccc;
+    font-size: 0.85rem;
+    font-family: monospace;
+    min-width: 120px;
+    text-align: center;
+}
+
+/* Transcript panel */
+.vp-transcript-header {
+    flex-shrink: 0;
+    border-bottom: 1px solid #dee2e6;
+}
+.vp-transcript-search {
+    padding: 8px 8px 4px;
+}
+.vp-transcript-lang-selector {
+    padding: 0 8px 6px;
+}
+.vp-transcript-lang-selector select {
+    font-size: 0.8rem;
+    padding: 2px 6px;
+    height: auto;
+}
+.vp-match-count {
+    font-size: 0.75rem;
+    min-width: 50px;
+    text-align: center;
+    background: #fff;
+}
+.vp-transcript-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+    scroll-behavior: smooth;
+}
+.vp-cue {
+    padding: 6px 12px;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: background 0.15s, border-color 0.15s;
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+.vp-cue:hover {
+    background: #e9ecef;
+}
+.vp-cue.vp-cue-active {
+    background: #d4edda;
+    border-left-color: #28a745;
+    font-weight: 500;
+}
+.vp-cue-time {
+    font-size: 0.7rem;
+    color: #6c757d;
+    font-family: monospace;
+    margin-right: 6px;
+}
+.vp-cue-text {
+    color: #333;
+}
+.vp-search-match {
+    background: #fff3cd;
+    padding: 0 1px;
+    border-radius: 2px;
+}
+.vp-search-match.vp-search-current {
+    background: #ffc107;
+    font-weight: bold;
+}
+.vp-transcript-loading {
+    padding: 40px 10px;
+}
+.vp-transcript-empty {
+    color: #999;
+    text-align: center;
+    padding: 40px 10px;
+    font-size: 0.9rem;
+}
+
+/* ===== Gallery Styles ===== */
 .zoom-yt-video-gallery .video-thumbnail-wrapper {
     cursor: pointer;
     overflow: hidden;
@@ -272,19 +457,617 @@
 .zoom-yt-video-gallery .video-thumbnail-wrapper-small:hover .video-play-overlay-small {
     opacity: 1;
 }
+
+/* Responsive: stack transcript below on small screens */
+@media (max-width: 768px) {
+    .vp-main-container {
+        flex-direction: column;
+        height: auto;
+        max-height: calc(92vh - 160px);
+    }
+    .vp-video-col {
+        flex: none;
+        height: 50vh;
+    }
+    .vp-transcript-col {
+        flex: none;
+        max-width: none;
+        min-width: auto;
+        height: 30vh;
+        border-left: none;
+        border-top: 1px solid #dee2e6;
+    }
+}
 </style>
 
 {{#js}}
 require(['jquery'], function($) {
     var cmid = {{cmid}};
     var videos = {{{videos_json}}};
-    
-    // View toggle
+    var userLang = '{{userlang}}' || 'en';
+    var ytPlayer = null;
+    var ytReady = false;
+    var currentVideo = null;
+    var captions = [];        // Parsed SRT captions [{start, end, text}]
+    var chapters = [];        // Chapter boundaries (from YT or transcript segments)
+    var syncInterval = null;  // setInterval for transcript sync
+    var trackInterval = null; // setInterval for watch progress tracking
+    var accumulatedSeconds = 0; // Seconds accumulated since last save
+    var lastTrackTime = 0;      // Last timestamp we tracked
+    var searchMatches = [];
+    var searchMatchIdx = -1;
+    var currentTranscriptLang = ''; // Currently loaded transcript language
+
+    // =====================================================
+    // YouTube IFrame Player API
+    // =====================================================
+    // Load the API script.
+    var tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    var firstScript = document.getElementsByTagName('script')[0];
+    firstScript.parentNode.insertBefore(tag, firstScript);
+
+    // Global callback required by YouTube API.
+    window.onYouTubeIframeAPIReady = function() {
+        ytReady = true;
+    };
+
+    // =====================================================
+    // SRT Parser
+    // =====================================================
+    function parseSRT(text) {
+        var result = [];
+        // Normalize line endings and split by double newline.
+        var blocks = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split(/\n\n+/);
+        for (var i = 0; i < blocks.length; i++) {
+            var lines = blocks[i].split('\n');
+            if (lines.length < 2) continue;
+
+            // Find the timecode line (contains '-->').
+            var tcLineIdx = -1;
+            for (var j = 0; j < lines.length; j++) {
+                if (lines[j].indexOf('-->') !== -1) {
+                    tcLineIdx = j;
+                    break;
+                }
+            }
+            if (tcLineIdx === -1) continue;
+
+            var tc = lines[tcLineIdx].split('-->');
+            if (tc.length !== 2) continue;
+
+            var startSec = parseTimecode(tc[0].trim());
+            var endSec = parseTimecode(tc[1].trim());
+            var captionText = lines.slice(tcLineIdx + 1).join(' ').replace(/<[^>]+>/g, '').trim();
+
+            if (captionText && !isNaN(startSec) && !isNaN(endSec)) {
+                result.push({ start: startSec, end: endSec, text: captionText });
+            }
+        }
+        return result;
+    }
+
+    function parseTimecode(tc) {
+        // Handle HH:MM:SS,mmm or HH:MM:SS.mmm or MM:SS,mmm
+        tc = tc.replace(',', '.');
+        var parts = tc.split(':');
+        if (parts.length === 3) {
+            return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
+        } else if (parts.length === 2) {
+            return parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
+        }
+        return parseFloat(tc) || 0;
+    }
+
+    function formatTime(seconds) {
+        seconds = Math.floor(seconds);
+        var h = Math.floor(seconds / 3600);
+        var m = Math.floor((seconds % 3600) / 60);
+        var s = seconds % 60;
+        if (h > 0) {
+            return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+        }
+        return m + ':' + String(s).padStart(2, '0');
+    }
+
+    // =====================================================
+    // Transcript Rendering
+    // =====================================================
+    function renderTranscript() {
+        var body = $('#vpTranscriptBody');
+        body.empty();
+
+        if (!captions.length) {
+            body.html('<div class="vp-transcript-empty"><i class="fa fa-file-text-o"></i><br>No transcript available</div>');
+            $('#vpTranscriptCol').addClass('vp-no-transcript');
+            return;
+        }
+
+        $('#vpTranscriptCol').removeClass('vp-no-transcript');
+
+        for (var i = 0; i < captions.length; i++) {
+            var cue = $('<div class="vp-cue" data-idx="' + i + '" data-start="' + captions[i].start + '"></div>');
+            cue.append('<span class="vp-cue-time">' + formatTime(captions[i].start) + '</span>');
+            cue.append('<span class="vp-cue-text">' + escapeHtml(captions[i].text) + '</span>');
+            body.append(cue);
+        }
+    }
+
+    function escapeHtml(text) {
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(text));
+        return div.innerHTML;
+    }
+
+    // =====================================================
+    // Transcript Sync
+    // =====================================================
+    function startSync() {
+        stopSync();
+        syncInterval = setInterval(function() {
+            if (!ytPlayer || typeof ytPlayer.getCurrentTime !== 'function') return;
+            var state = ytPlayer.getPlayerState();
+            if (state !== 1) return; // Only sync while playing.
+
+            var t = ytPlayer.getCurrentTime();
+            updateActiveCaption(t);
+            updateTimeDisplay(t);
+        }, 250);
+    }
+
+    function stopSync() {
+        if (syncInterval) {
+            clearInterval(syncInterval);
+            syncInterval = null;
+        }
+    }
+
+    function updateActiveCaption(t) {
+        var activeIdx = -1;
+        for (var i = 0; i < captions.length; i++) {
+            if (t >= captions[i].start && t < captions[i].end) {
+                activeIdx = i;
+                break;
+            }
+        }
+
+        var cues = $('#vpTranscriptBody .vp-cue');
+        var wasActive = cues.filter('.vp-cue-active').data('idx');
+
+        if (activeIdx !== wasActive) {
+            cues.removeClass('vp-cue-active');
+            if (activeIdx >= 0) {
+                var activeCue = cues.eq(activeIdx);
+                activeCue.addClass('vp-cue-active');
+
+                // Auto-scroll to active cue.
+                var container = $('#vpTranscriptBody');
+                var cueTop = activeCue.position().top;
+                var containerHeight = container.height();
+                if (cueTop < 0 || cueTop > containerHeight - 40) {
+                    container.scrollTop(container.scrollTop() + cueTop - containerHeight / 3);
+                }
+            }
+        }
+    }
+
+    function updateTimeDisplay(t) {
+        var dur = ytPlayer.getDuration ? ytPlayer.getDuration() : 0;
+        $('#vpTimeDisplay').text(formatTime(t) + ' / ' + formatTime(dur));
+    }
+
+    // =====================================================
+    // Chapter Navigation
+    // =====================================================
+    function buildChapters() {
+        chapters = [];
+
+        // Try to use YouTube chapters if available (future: YT API getChapters).
+        // Fallback: create pseudo-chapters from transcript segments (~60s each).
+        if (captions.length > 0) {
+            var chunkSize = 60; // seconds per chapter.
+            var duration = ytPlayer && ytPlayer.getDuration ? ytPlayer.getDuration() : captions[captions.length - 1].end;
+            for (var t = 0; t < duration; t += chunkSize) {
+                chapters.push(t);
+            }
+        } else {
+            // No captions - create 5-minute chapters based on video duration.
+            var dur = ytPlayer && ytPlayer.getDuration ? ytPlayer.getDuration() : 0;
+            if (dur > 0) {
+                var interval = Math.min(300, Math.max(60, dur / 10)); // 60s to 300s.
+                for (var t2 = 0; t2 < dur; t2 += interval) {
+                    chapters.push(t2);
+                }
+            }
+        }
+    }
+
+    function seekToNextChapter() {
+        if (!ytPlayer || !chapters.length) return;
+        var t = ytPlayer.getCurrentTime();
+        for (var i = 0; i < chapters.length; i++) {
+            if (chapters[i] > t + 1) {
+                ytPlayer.seekTo(chapters[i], true);
+                return;
+            }
+        }
+    }
+
+    function seekToPrevChapter() {
+        if (!ytPlayer || !chapters.length) return;
+        var t = ytPlayer.getCurrentTime();
+        for (var i = chapters.length - 1; i >= 0; i--) {
+            if (chapters[i] < t - 2) {
+                ytPlayer.seekTo(chapters[i], true);
+                return;
+            }
+        }
+        ytPlayer.seekTo(0, true);
+    }
+
+    // =====================================================
+    // Transcript Search
+    // =====================================================
+    function performSearch(query) {
+        searchMatches = [];
+        searchMatchIdx = -1;
+        var cues = $('#vpTranscriptBody .vp-cue');
+
+        // Restore original text.
+        cues.each(function(i) {
+            $(this).find('.vp-cue-text').html(escapeHtml(captions[i].text));
+        });
+
+        if (!query || query.length < 2) {
+            $('#vpMatchCount').text('');
+            return;
+        }
+
+        var lowerQuery = query.toLowerCase();
+        cues.each(function(i) {
+            var textSpan = $(this).find('.vp-cue-text');
+            var original = captions[i].text;
+            if (original.toLowerCase().indexOf(lowerQuery) !== -1) {
+                searchMatches.push(i);
+                // Highlight matches in the text.
+                var escaped = escapeHtml(original);
+                var regex = new RegExp('(' + escapeRegex(query) + ')', 'gi');
+                textSpan.html(escaped.replace(regex, '<span class="vp-search-match">$1</span>'));
+            }
+        });
+
+        if (searchMatches.length > 0) {
+            searchMatchIdx = 0;
+            highlightCurrentMatch();
+        }
+        updateMatchCount();
+    }
+
+    function escapeRegex(str) {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function highlightCurrentMatch() {
+        // Remove current highlight from all.
+        $('.vp-search-match').removeClass('vp-search-current');
+
+        if (searchMatchIdx < 0 || searchMatchIdx >= searchMatches.length) return;
+
+        var cueIdx = searchMatches[searchMatchIdx];
+        var cue = $('#vpTranscriptBody .vp-cue').eq(cueIdx);
+        cue.find('.vp-search-match').first().addClass('vp-search-current');
+
+        // Scroll to it.
+        var container = $('#vpTranscriptBody');
+        var cueTop = cue.position().top;
+        container.scrollTop(container.scrollTop() + cueTop - container.height() / 3);
+    }
+
+    function updateMatchCount() {
+        if (searchMatches.length === 0) {
+            $('#vpMatchCount').text($('#vpSearchInput').val().length >= 2 ? '0' : '');
+        } else {
+            $('#vpMatchCount').text((searchMatchIdx + 1) + '/' + searchMatches.length);
+        }
+    }
+
+    function searchNext() {
+        if (searchMatches.length === 0) return;
+        searchMatchIdx = (searchMatchIdx + 1) % searchMatches.length;
+        highlightCurrentMatch();
+        updateMatchCount();
+    }
+
+    function searchPrev() {
+        if (searchMatches.length === 0) return;
+        searchMatchIdx = (searchMatchIdx - 1 + searchMatches.length) % searchMatches.length;
+        highlightCurrentMatch();
+        updateMatchCount();
+    }
+
+    // =====================================================
+    // Watch Progress Tracking
+    // =====================================================
+    function startTracking() {
+        stopTracking();
+        accumulatedSeconds = 0;
+        lastTrackTime = Date.now();
+
+        trackInterval = setInterval(function() {
+            if (!ytPlayer || typeof ytPlayer.getPlayerState !== 'function') return;
+            if (ytPlayer.getPlayerState() !== 1) return; // Only while playing.
+
+            var now = Date.now();
+            var elapsed = (now - lastTrackTime) / 1000;
+            lastTrackTime = now;
+
+            // Cap at 20s to handle tab-switch or sleep.
+            accumulatedSeconds += Math.min(elapsed, 20);
+
+            // Save every ~15 seconds of accumulated watch time.
+            if (accumulatedSeconds >= 15) {
+                saveProgress();
+            }
+        }, 5000); // Check every 5 seconds.
+    }
+
+    function stopTracking() {
+        if (trackInterval) {
+            clearInterval(trackInterval);
+            trackInterval = null;
+        }
+    }
+
+    function saveProgress() {
+        if (!currentVideo || accumulatedSeconds < 1) return;
+
+        var duration = ytPlayer && ytPlayer.getDuration ? ytPlayer.getDuration() : 0;
+        var position = ytPlayer && ytPlayer.getCurrentTime ? ytPlayer.getCurrentTime() : 0;
+        var sendSeconds = Math.round(accumulatedSeconds);
+        accumulatedSeconds = 0;
+
+        $.ajax({
+            url: M.cfg.wwwroot + '/mod/zoomyt/ajax_video.php',
+            method: 'POST',
+            data: {
+                action: 'trackprogress',
+                videoid: currentVideo.id,
+                watchedseconds: sendSeconds,
+                videoduration: Math.round(duration),
+                lastposition: Math.round(position),
+                cmid: cmid,
+                sesskey: M.cfg.sesskey
+            }
+        });
+    }
+
+    // =====================================================
+    // Language Selection Helpers
+    // =====================================================
+
+    // Language display names for common codes.
+    var langNames = {
+        'en': 'English', 'fr': 'Fran\u00e7ais', 'es': 'Espa\u00f1ol',
+        'de': 'Deutsch', 'pt': 'Portugu\u00eas', 'it': 'Italiano',
+        'nl': 'Nederlands', 'ru': '\u0420\u0443\u0441\u0441\u043a\u0438\u0439',
+        'ja': '\u65e5\u672c\u8a9e', 'ko': '\ud55c\uad6d\uc5b4',
+        'zh': '\u4e2d\u6587', 'ar': '\u0627\u0644\u0639\u0631\u0628\u064a\u0629'
+    };
+
+    function getLangName(code) {
+        return langNames[code] || code.toUpperCase();
+    }
+
+    /**
+     * Choose the best transcript language from available options.
+     * Priority: userLang > 'en' > first available.
+     */
+    function chooseBestLang(availableLangs) {
+        if (!availableLangs || availableLangs.length === 0) return '';
+        if (availableLangs.indexOf(userLang) !== -1) return userLang;
+        if (availableLangs.indexOf('en') !== -1) return 'en';
+        return availableLangs[0];
+    }
+
+    /**
+     * Set up the transcript language selector for a video.
+     */
+    function setupLangSelector(video) {
+        var urls = video.transcript_urls || {};
+        var langs = Object.keys(urls);
+        var selector = $('#vpLangSelector');
+        var select = $('#vpLangSelect');
+
+        if (langs.length <= 1) {
+            // Only one or no languages - hide the selector.
+            selector.addClass('d-none');
+            return;
+        }
+
+        // Multiple languages - show selector.
+        select.empty();
+        for (var i = 0; i < langs.length; i++) {
+            var opt = $('<option></option>').val(langs[i]).text(getLangName(langs[i]));
+            select.append(opt);
+        }
+
+        var best = chooseBestLang(langs);
+        select.val(best);
+        selector.removeClass('d-none');
+    }
+
+    /**
+     * Load a transcript for a specific language.
+     */
+    function loadTranscript(video, lang) {
+        var urls = video.transcript_urls || {};
+        var url = urls[lang];
+
+        if (!url) {
+            captions = [];
+            renderTranscript();
+            return;
+        }
+
+        currentTranscriptLang = lang;
+        $('#vpTranscriptBody').html('<div class="vp-transcript-loading text-center text-muted p-3"><i class="fa fa-spinner fa-spin"></i> Loading transcript...</div>');
+
+        $.ajax({
+            url: url,
+            dataType: 'text',
+            success: function(data) {
+                captions = parseSRT(data);
+                renderTranscript();
+                // Re-apply search if there was one.
+                var q = $('#vpSearchInput').val();
+                if (q && q.length >= 2) {
+                    performSearch(q);
+                }
+                if (ytPlayer && ytPlayer.getDuration) {
+                    buildChapters();
+                }
+            },
+            error: function() {
+                captions = [];
+                renderTranscript();
+            }
+        });
+    }
+
+    // =====================================================
+    // Open Video
+    // =====================================================
+    function openVideo(video) {
+        currentVideo = video;
+        captions = [];
+        chapters = [];
+        searchMatches = [];
+        searchMatchIdx = -1;
+        accumulatedSeconds = 0;
+        lastTrackTime = Date.now();
+        currentTranscriptLang = '';
+
+        $('#videoPlayerTitle').text(video.title);
+        $('#vpSearchInput').val('');
+        $('#vpMatchCount').text('');
+        $('#vpTranscriptBody').html('<div class="vp-transcript-loading text-center text-muted p-3"><i class="fa fa-spinner fa-spin"></i> Loading transcript...</div>');
+        $('#vpTranscriptCol').removeClass('vp-no-transcript');
+        $('#vpTimeDisplay').text('0:00 / 0:00');
+
+        // Show modal first.
+        $('#videoPlayerModal').modal('show');
+
+        // Record view.
+        $.ajax({
+            url: M.cfg.wwwroot + '/mod/zoomyt/ajax.php',
+            method: 'POST',
+            data: {
+                action: 'record_view',
+                videoid: video.id,
+                cmid: cmid,
+                sesskey: M.cfg.sesskey
+            }
+        });
+
+        // Set up language selector and load best transcript.
+        var urls = video.transcript_urls || {};
+        var langs = Object.keys(urls);
+
+        setupLangSelector(video);
+
+        if (langs.length > 0) {
+            var bestLang = chooseBestLang(langs);
+            loadTranscript(video, bestLang);
+        } else if (video.transcript_url) {
+            // Fallback: single transcript URL (legacy).
+            $.ajax({
+                url: video.transcript_url,
+                dataType: 'text',
+                success: function(data) {
+                    captions = parseSRT(data);
+                    renderTranscript();
+                    if (ytPlayer && ytPlayer.getDuration) {
+                        buildChapters();
+                    }
+                },
+                error: function() {
+                    captions = [];
+                    renderTranscript();
+                }
+            });
+        } else {
+            captions = [];
+            renderTranscript();
+        }
+    }
+
+    // =====================================================
+    // Create / Reload YouTube Player
+    // =====================================================
+    function createPlayer(videoId) {
+        function doCreate() {
+            if (ytPlayer) {
+                ytPlayer.loadVideoById(videoId);
+                return;
+            }
+
+            ytPlayer = new YT.Player('ytplayer', {
+                videoId: videoId,
+                playerVars: {
+                    autoplay: 1,
+                    modestbranding: 1,
+                    rel: 0,
+                    enablejsapi: 1,
+                    origin: window.location.origin,
+                    hl: userLang,
+                    cc_lang_pref: userLang,
+                    cc_load_policy: 0
+                },
+                events: {
+                    onReady: function() {
+                        buildChapters();
+                        startSync();
+                        startTracking();
+                    },
+                    onStateChange: function(event) {
+                        if (event.data === YT.PlayerState.PLAYING) {
+                            lastTrackTime = Date.now();
+                            startSync();
+                        } else if (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.ENDED) {
+                            // Save any accumulated progress on pause/end.
+                            accumulatedSeconds += (Date.now() - lastTrackTime) / 1000;
+                            saveProgress();
+                        }
+                    }
+                }
+            });
+        }
+
+        if (ytReady) {
+            doCreate();
+        } else {
+            // Wait for API to load.
+            var waitCount = 0;
+            var waitTimer = setInterval(function() {
+                waitCount++;
+                if (ytReady || waitCount > 50) {
+                    clearInterval(waitTimer);
+                    if (ytReady) doCreate();
+                }
+            }, 200);
+        }
+    }
+
+    // =====================================================
+    // Event Handlers
+    // =====================================================
+
+    // View toggle.
     $('.view-toggle').on('click', function() {
         var view = $(this).data('view');
         $('.view-toggle').removeClass('btn-primary').addClass('btn-outline-secondary');
         $(this).removeClass('btn-outline-secondary').addClass('btn-primary');
-        
+
         if (view === 'tile') {
             $('#tile-view').removeClass('d-none');
             $('#list-view').addClass('d-none');
@@ -293,44 +1076,110 @@ require(['jquery'], function($) {
             $('#list-view').removeClass('d-none');
         }
     });
-    
-    // Video click to play
+
+    // Video click to play.
     $('.video-thumbnail-wrapper, .video-thumbnail-wrapper-small, .video-title').on('click', function() {
         var card = $(this).closest('.video-card, .video-row');
         var videoid = card.data('videoid');
         var video = videos.find(function(v) { return v.id == videoid; });
-        
         if (video) {
-            $('#videoPlayerTitle').text(video.title);
-            $('#videoPlayerFrame').attr('src', video.embed_url + '?autoplay=1');
-            $('#videoPlayerModal').modal('show');
-            
-            // Record view via AJAX
-            $.ajax({
-                url: M.cfg.wwwroot + '/mod/zoomyt/ajax.php',
-                method: 'POST',
-                data: {
-                    action: 'record_view',
-                    videoid: videoid,
-                    cmid: cmid,
-                    sesskey: M.cfg.sesskey
-                }
-            });
+            openVideo(video);
+            createPlayer(video.youtube_video_id);
         }
     });
-    
-    // Stop video when modal closes
-    $('#videoPlayerModal').on('hidden.bs.modal', function() {
-        $('#videoPlayerFrame').attr('src', '');
+
+    // Transcript click to seek.
+    $(document).on('click', '.vp-cue', function() {
+        var startTime = parseFloat($(this).data('start'));
+        if (ytPlayer && typeof ytPlayer.seekTo === 'function') {
+            ytPlayer.seekTo(startTime, true);
+        }
     });
-    
-    // Toggle visibility
+
+    // Controls.
+    $('#vpRewind30').on('click', function() {
+        if (ytPlayer && ytPlayer.getCurrentTime) {
+            ytPlayer.seekTo(Math.max(0, ytPlayer.getCurrentTime() - 30), true);
+        }
+    });
+    $('#vpForward30').on('click', function() {
+        if (ytPlayer && ytPlayer.getCurrentTime) {
+            ytPlayer.seekTo(ytPlayer.getCurrentTime() + 30, true);
+        }
+    });
+    $('#vpPrevChapter').on('click', function() {
+        seekToPrevChapter();
+    });
+    $('#vpNextChapter').on('click', function() {
+        seekToNextChapter();
+    });
+
+    // Transcript language selector.
+    $('#vpLangSelect').on('change', function() {
+        var lang = $(this).val();
+        if (currentVideo && lang && lang !== currentTranscriptLang) {
+            loadTranscript(currentVideo, lang);
+        }
+    });
+
+    // Search.
+    var searchTimer = null;
+    $('#vpSearchInput').on('input', function() {
+        clearTimeout(searchTimer);
+        var q = $(this).val();
+        searchTimer = setTimeout(function() {
+            performSearch(q);
+        }, 300);
+    });
+    $('#vpSearchInput').on('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (searchMatches.length > 0) {
+                searchNext();
+                // Also seek to the match time.
+                var cueIdx = searchMatches[searchMatchIdx];
+                if (ytPlayer && typeof ytPlayer.seekTo === 'function') {
+                    ytPlayer.seekTo(captions[cueIdx].start, true);
+                }
+            }
+        }
+    });
+    $('#vpSearchNext').on('click', function() {
+        searchNext();
+    });
+    $('#vpSearchPrev').on('click', function() {
+        searchPrev();
+    });
+
+    // Modal close - cleanup.
+    $('#videoPlayerModal').on('hidden.bs.modal', function() {
+        stopSync();
+
+        // Save remaining progress.
+        if (ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
+            accumulatedSeconds += Math.max(0, (Date.now() - lastTrackTime) / 1000);
+            saveProgress();
+        }
+        stopTracking();
+
+        // Destroy player to stop playback.
+        if (ytPlayer && typeof ytPlayer.destroy === 'function') {
+            ytPlayer.destroy();
+            ytPlayer = null;
+            // Recreate the div for next use.
+            $('.vp-player-wrapper').html('<div id="ytplayer"></div>');
+        }
+
+        currentVideo = null;
+    });
+
+    // Visibility toggle.
     $('.toggle-visibility').on('click', function(e) {
         e.stopPropagation();
         var btn = $(this);
         var videoid = btn.data('videoid');
         var currentlyVisible = btn.data('visible');
-        
+
         $.ajax({
             url: M.cfg.wwwroot + '/mod/zoomyt/ajax.php',
             method: 'POST',

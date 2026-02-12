@@ -27,6 +27,7 @@ define('AJAX_SCRIPT', true);
 require_once(__DIR__ . '/../../config.php');
 require_once(__DIR__ . '/lib.php');
 require_once(__DIR__ . '/locallib.php');
+require_once($CFG->libdir . '/completionlib.php');
 
 $action = required_param('action', PARAM_ALPHA);
 $videoid = required_param('videoid', PARAM_INT);
@@ -37,10 +38,14 @@ $zoom = $DB->get_record('zoomyt', ['id' => $video->zoomid], '*', MUST_EXIST);
 $cm = get_coursemodule_from_instance('zoomyt', $zoom->id, $zoom->course, false, MUST_EXIST);
 $context = context_module::instance($cm->id);
 
-// Require login and capability.
+// Require login and sesskey.
 require_login($zoom->course, true, $cm);
-require_capability('mod/zoomyt:addinstance', $context);
 require_sesskey();
+
+// Most actions require teacher capability; trackprogress is for all enrolled users.
+if ($action !== 'trackprogress') {
+    require_capability('mod/zoomyt:addinstance', $context);
+}
 
 header('Content-Type: application/json');
 
@@ -135,6 +140,66 @@ try {
                     'thumbnail_url' => $video->thumbnail_url,
                     'caption_languages' => $video->caption_languages ?? '',
                 ],
+            ];
+            break;
+
+        case 'trackprogress':
+            // Track video watch progress (available to all enrolled users).
+            $watchedseconds = required_param('watchedseconds', PARAM_INT);
+            $videoduration = required_param('videoduration', PARAM_INT);
+            $lastposition = required_param('lastposition', PARAM_INT);
+
+            $userid = $USER->id;
+            $now = time();
+
+            // Get existing progress record.
+            $existing = $DB->get_record('zoomyt_video_progress', [
+                'videoid' => $videoid,
+                'userid' => $userid,
+            ]);
+
+            if ($existing) {
+                // Accumulate watched seconds.
+                $existing->watchedseconds += max(0, $watchedseconds);
+                $existing->videoduration = max($existing->videoduration, $videoduration);
+                $existing->lastposition = $lastposition;
+
+                // Calculate percentage.
+                if ($existing->videoduration > 0) {
+                    $existing->percentcomplete = min(100, round(($existing->watchedseconds / $existing->videoduration) * 100));
+                }
+
+                $existing->timemodified = $now;
+                $DB->update_record('zoomyt_video_progress', $existing);
+                $percentcomplete = $existing->percentcomplete;
+            } else {
+                // Create new record.
+                $record = new stdClass();
+                $record->videoid = $videoid;
+                $record->userid = $userid;
+                $record->watchedseconds = max(0, $watchedseconds);
+                $record->videoduration = max(0, $videoduration);
+                $record->lastposition = $lastposition;
+                $record->percentcomplete = $videoduration > 0
+                    ? min(100, round(($record->watchedseconds / $record->videoduration) * 100))
+                    : 0;
+                $record->timecreated = $now;
+                $record->timemodified = $now;
+                $DB->insert_record('zoomyt_video_progress', $record);
+                $percentcomplete = $record->percentcomplete;
+            }
+
+            // Check and update activity completion if watch percent rule is configured.
+            if (!empty($zoom->completionwatchpercent) && $zoom->completionwatchpercent > 0) {
+                $completion = new completion_info($DB->get_record('course', ['id' => $zoom->course]));
+                if ($completion->is_enabled($cm)) {
+                    $completion->update_state($cm, COMPLETION_UNKNOWN, $userid);
+                }
+            }
+
+            $result = [
+                'success' => true,
+                'percentcomplete' => $percentcomplete,
             ];
             break;
 

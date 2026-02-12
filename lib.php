@@ -1068,6 +1068,8 @@ function zoomyt_pluginfile($course, $cm, $context, $filearea, array $args, $forc
             send_file_not_found();
         }
 
+        // Allow inline serving for AJAX transcript fetching (no forcedownload).
+        // The pluginfile URL without the forcedownload flag will serve inline.
         send_stored_file($file, 86400, 0, $forcedownload, $options);
     }
 

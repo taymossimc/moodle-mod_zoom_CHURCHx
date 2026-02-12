@@ -552,6 +552,7 @@ $string['view_on_youtube'] = 'Voir sur YouTube';
 $string['session_date'] = 'Date de session';
 $string['video_duration'] = 'Durée';
 $string['toggle_video_visibility'] = 'Basculer la visibilité';
+$string['visibility'] = 'Visibilité';
 $string['video_visible'] = 'Visible pour les étudiants';
 $string['video_hidden'] = 'Masqué aux étudiants';
 $string['video_updated'] = 'Vidéo mise à jour avec succès';
@@ -624,6 +625,21 @@ $string['inherit_youtube_settings_help'] = 'Lorsqu\'activé, cette catégorie ut
 $string['completionattendance'] = 'Exiger une durée de présence';
 $string['completionattendance_help'] = 'Nombre minimum de minutes pendant lesquelles le participant doit assister à la réunion pour terminer cette activité. Définissez sur 0 pour désactiver cette exigence.';
 $string['completionattendance_desc'] = 'Assister pendant au moins {$a} minutes';
+$string['completionwatchpercent'] = 'Exiger un pourcentage de visionnage vidéo';
+$string['completionwatchpercent_help'] = 'Pourcentage minimum de la vidéo que l\'étudiant doit regarder pour terminer cette activité. Le système suit le temps de lecture accumulé. Définissez sur 0 pour désactiver. Cela fonctionne comme une alternative à la durée de présence - un étudiant peut terminer l\'activité en assistant à la session en direct OU en regardant l\'enregistrement.';
+$string['completionwatchpercent_desc'] = 'Regarder au moins {$a}% de l\'enregistrement vidéo';
+
+// Chaînes du lecteur vidéo.
+$string['rewind30'] = 'Reculer de 30 secondes';
+$string['forward30'] = 'Avancer de 30 secondes';
+$string['prevchapter'] = 'Chapitre précédent';
+$string['nextchapter'] = 'Chapitre suivant';
+$string['searchtranscript'] = 'Rechercher dans la transcription';
+$string['notranscriptavailable'] = 'Aucune transcription disponible';
+$string['loadingtranscript'] = 'Chargement de la transcription...';
+$string['watchprogress'] = 'Progression du visionnage';
+$string['resumefrom'] = 'Reprendre à {$a}';
+$string['transcriptlanguage'] = 'Langue de la transcription';
 
 // Chaînes YouTube au niveau de l'activité.
 $string['youtube_activity_header'] = 'Intégration YouTube';

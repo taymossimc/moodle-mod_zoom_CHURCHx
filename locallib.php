@@ -268,9 +268,37 @@ function zoomyt_get_sessions_for_display($zoomid) {
 
         $sessions[$uuid]['count'] = $uniqueparticipantcount;
         $sessions[$uuid]['topic'] = $instance->topic;
-        $sessions[$uuid]['duration'] = $instance->duration;
-        $sessions[$uuid]['starttime'] = userdate($instance->start_time, $format);
-        $sessions[$uuid]['endtime'] = userdate($instance->start_time + $instance->duration * 60, $format);
+
+        // Calculate actual session duration from participant join/leave times.
+        // This gives the real elapsed time from first join to last leave,
+        // which is more accurate than the Zoom API duration (which may only
+        // reflect the original host's session time).
+        $earliestjoin = null;
+        $latestleave = null;
+        foreach ($participantlist as $participant) {
+            if (!empty($participant->join_time)) {
+                if ($earliestjoin === null || $participant->join_time < $earliestjoin) {
+                    $earliestjoin = $participant->join_time;
+                }
+            }
+            if (!empty($participant->leave_time)) {
+                if ($latestleave === null || $participant->leave_time > $latestleave) {
+                    $latestleave = $participant->leave_time;
+                }
+            }
+        }
+
+        if ($earliestjoin !== null && $latestleave !== null && $latestleave > $earliestjoin) {
+            // Use participant-derived duration (in seconds).
+            $sessions[$uuid]['duration'] = $latestleave - $earliestjoin;
+            $sessions[$uuid]['starttime'] = userdate($earliestjoin, $format);
+            $sessions[$uuid]['endtime'] = userdate($latestleave, $format);
+        } else {
+            // Fallback to Zoom API values.
+            $sessions[$uuid]['duration'] = $instance->duration;
+            $sessions[$uuid]['starttime'] = userdate($instance->start_time, $format);
+            $sessions[$uuid]['endtime'] = userdate($instance->start_time + $instance->duration, $format);
+        }
     }
 
     return $sessions;

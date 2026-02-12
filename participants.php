@@ -98,7 +98,7 @@ if (!empty($export)) {
     ];
 } else {
     $table->head = [
-        get_string('idnumber'),
+        get_string('email'),
         get_string('name'),
         get_string('jointime', 'mod_zoomyt'),
         get_string('leavetime', 'mod_zoomyt'),
@@ -115,11 +115,11 @@ foreach ($participants as $p) {
         $moodleuser = $DB->get_record('user', ['id' => $p->userid], 'idnumber, email');
     }
 
-    // ID number.
-    if (array_key_exists($p->userid, $moodleidtouids)) {
-        $row[] = $moodleidtouids[$p->userid];
-    } else if (isset($moodleuser->idnumber)) {
-        $row[] = $moodleuser->idnumber;
+    // Email address.
+    if (!empty($moodleuser->email)) {
+        $row[] = $moodleuser->email;
+    } else if (!empty($p->user_email)) {
+        $row[] = $p->user_email;
     } else {
         $row[] = '';
     }
@@ -165,9 +165,12 @@ if ($export != 'xls') {
     $xlsicon = html_writer::img(
         $OUTPUT->image_url('f/spreadsheet'),
         $xlsstring,
-        ['title' => $xlsstring, 'class' => 'mimetypeicon']
+        ['title' => $xlsstring, 'class' => 'icon', 'width' => '24', 'height' => '24']
     );
-    echo get_string('export', 'mod_zoomyt') . ': ' . html_writer::link($exporturl, $xlsicon);
+    echo html_writer::div(
+        get_string('export', 'mod_zoomyt') . ': ' . html_writer::link($exporturl, $xlsicon . ' ' . $xlsstring, ['class' => 'btn btn-outline-secondary btn-sm']),
+        'mt-3 mb-3'
+    );
 
     echo $OUTPUT->footer();
 } else {

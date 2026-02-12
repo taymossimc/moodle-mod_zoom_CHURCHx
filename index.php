@@ -188,7 +188,7 @@ echo $OUTPUT->heading($strold, 4, null, 'mod-zoom-old-meetings-header');
 if (has_capability('mod/zoomyt:refreshsessions', $context)) {
     $linkarguments = [
         'courseid' => $id,
-        'start' => date('Y-m-d', strtotime('-3 days')),
+        'start' => date('Y-m-d', strtotime('-30 days')),
         'end' => date('Y-m-d'),
     ];
     $url = new moodle_url($CFG->wwwroot . '/mod/zoomyt/console/get_meeting_report.php', $linkarguments);

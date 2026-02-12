@@ -15,7 +15,10 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Console page to output the results of the CLI to get the Zoom meeting reports.
+ * Web page to run the Zoom meeting reports task directly (no CLI dependency).
+ *
+ * Previously this used exec() to call the CLI script, which failed when the
+ * PHP CLI was missing the intl extension. Now it runs the task in-process.
  *
  * @package    mod_zoomyt
  * @copyright  2020 UC Regents
@@ -25,12 +28,8 @@
 require(__DIR__ . '/../../../config.php');
 require_once($CFG->libdir . '/moodlelib.php');
 
-// Force debugging errors.
-error_reporting(E_ALL);
-ini_set('display_errors', '1');
-
 $courseid = required_param('courseid', PARAM_INT);
-$startdate = optional_param('start', date('Y-m-d', strtotime('-3 days')), PARAM_ALPHANUMEXT);
+$startdate = optional_param('start', date('Y-m-d', strtotime('-30 days')), PARAM_ALPHANUMEXT);
 $enddate = optional_param('end', date('Y-m-d'), PARAM_ALPHANUMEXT);
 
 $course = $DB->get_record('course', ['id' => $courseid], '*', MUST_EXIST);
@@ -42,19 +41,54 @@ require_capability('mod/zoomyt:view', $context);
 require_capability('mod/zoomyt:refreshsessions', $context);
 
 // Set up the moodle page.
-$PAGE->set_url('/mod/zoomyt/console/');
+$PAGE->set_url('/mod/zoomyt/console/get_meeting_report.php', [
+    'courseid' => $courseid,
+    'start' => $startdate,
+    'end' => $enddate,
+]);
+$PAGE->set_context($context);
+$PAGE->set_title(get_string('getmeetingreports', 'mod_zoomyt'));
 
-echo html_writer::tag('h1', get_string('getmeetingreports', 'mod_zoomyt'));
-$output = null;
-$arguments = implode(
-    ' ',
-    [
-        '--start=' . escapeshellarg($startdate),
-        '--end=' . escapeshellarg($enddate),
-        '--courseid=' . escapeshellarg($courseid),
-    ]
-);
-exec("php $CFG->dirroot/mod/zoomyt/cli/get_meeting_report.php $arguments", $output);
+echo $OUTPUT->header();
+echo $OUTPUT->heading(get_string('getmeetingreports', 'mod_zoomyt'));
+
 echo '<pre>';
-echo implode("\n", $output);
+
+// Capture mtrace output.
+ob_start();
+
+// Find host UUIDs for this course.
+$hostuuids = $DB->get_fieldset_select('zoomyt', 'DISTINCT host_id', 'course = :courseid', ['courseid' => $courseid]);
+
+if (empty($hostuuids)) {
+    mtrace('No Zoom activities found for this course.');
+} else {
+    mtrace(sprintf('Found %d host(s) for course %d', count($hostuuids), $courseid));
+    mtrace(sprintf('Date range: %s to %s', $startdate, $enddate));
+    mtrace('');
+
+    try {
+        // Run the meeting reports task directly in-process.
+        $meetingtask = new \mod_zoomyt\task\get_meeting_reports();
+        $meetingtask->execute($startdate, $enddate, $hostuuids);
+        mtrace('');
+        mtrace('DONE!');
+    } catch (Exception $e) {
+        mtrace('');
+        mtrace('ERROR: ' . $e->getMessage());
+        mtrace('');
+        mtrace('Stack trace:');
+        mtrace($e->getTraceAsString());
+    }
+}
+
+$output = ob_get_clean();
+echo htmlspecialchars($output);
+
 echo '</pre>';
+
+// Add a back link.
+$backurl = new moodle_url('/mod/zoomyt/index.php', ['id' => $courseid]);
+echo html_writer::link($backurl, get_string('back'), ['class' => 'btn btn-primary mt-3']);
+
+echo $OUTPUT->footer();

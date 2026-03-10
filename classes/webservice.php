@@ -499,7 +499,7 @@ class webservice {
             $this->make_call($url, $data, 'post');
         } catch (moodle_exception $error) {
             // If the user already exists, the error will contain 'User already in the account'.
-            if (strpos($error->getMessage(), 'User already in the account') === true) {
+            if (strpos($error->getMessage(), 'User already in the account') !== false) {
                 return false;
             } else {
                 throw $error;
@@ -1006,6 +1006,48 @@ class webservice {
         // Granular: webinar:update:webinar:admin.
         $url = ($zoom->webinar ? 'webinars/' : 'meetings/') . $zoom->meeting_id;
         $this->make_call($url, $this->database_to_api($zoom, $cmid), 'patch');
+    }
+
+    /**
+     * Update only the alternative hosts for a meeting or webinar on Zoom.
+     *
+     * This sends a targeted PATCH that only modifies the alternative_hosts setting,
+     * avoiding the need to rebuild the full meeting payload via database_to_api().
+     *
+     * @param int|string $meetingid The Zoom meeting or webinar ID.
+     * @param bool $webinar Whether this is a webinar.
+     * @param string $alternativehosts Comma-separated email addresses.
+     * @return void
+     */
+    public function update_meeting_hosts($meetingid, $webinar, $alternativehosts) {
+        $url = ($webinar ? 'webinars/' : 'meetings/') . $meetingid;
+        $data = [
+            'settings' => [
+                'alternative_hosts' => $alternativehosts,
+            ],
+        ];
+        $this->make_call($url, $data, 'patch');
+    }
+
+    /**
+     * Update a Zoom user's display name.
+     *
+     * @param string $zoomuserid The Zoom user ID to update.
+     * @param string $firstname The new first name.
+     * @param string $lastname The new last name.
+     * @param string $displayname The new display name.
+     * @return void
+     */
+    public function update_user_name($zoomuserid, $firstname, $lastname, $displayname = '') {
+        $data = [
+            'first_name' => $firstname,
+            'last_name' => $lastname,
+        ];
+        if (!empty($displayname)) {
+            $data['display_name'] = $displayname;
+        }
+        // Granular: user:update:user:admin.
+        $this->make_call("users/$zoomuserid", $data, 'patch');
     }
 
     /**

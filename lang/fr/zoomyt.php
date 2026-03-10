@@ -52,6 +52,10 @@ $string['autoaddinstructorsashosts'] = 'Ajouter automatiquement les enseignants 
 $string['autoaddinstructorsashosts_desc'] = 'Lorsque activé, tous les enseignants du cours (utilisateurs ayant la capacité d\'ajouter des activités Zoom) seront automatiquement ajoutés comme hôtes alternatifs lors de la création ou mise à jour d\'une réunion Zoom. Cela garantit que tout enseignant du cours peut démarrer et animer les réunions, peu importe qui a créé l\'activité.';
 $string['autocreatezoomusers'] = 'Créer automatiquement des comptes Zoom pour les enseignants';
 $string['autocreatezoomusers_desc'] = 'Lorsque activé, les enseignants qui n\'ont pas encore de compte Zoom seront automatiquement ajoutés à votre compte Zoom et se verront attribuer une licence Pro (en utilisant la logique de recyclage des licences pour libérer une licence si nécessaire). Lorsque désactivé, seuls les enseignants ayant déjà un compte Zoom seront ajoutés comme hôtes alternatifs.';
+$string['fallback_host_email'] = 'Courriel de l\'hôte de secours';
+$string['fallback_host_email_desc'] = 'Courriel d\'un utilisateur Zoom licencié sur votre compte à utiliser comme hôte de la réunion lorsque le courriel de l\'enseignant n\'est pas disponible (par exemple, enregistré dans une autre organisation Zoom ou en attente d\'invitation). L\'enseignant rejoindra toujours avec le contrôle total de l\'hôte via l\'URL de démarrage, et le nom d\'affichage du compte de secours sera temporairement modifié pour correspondre au nom de l\'enseignant.';
+$string['fallback_host_not_configured'] = 'Votre courriel n\'est pas disponible sur ce compte Zoom et aucun hôte de secours n\'a été configuré. Contactez votre administrateur.';
+$string['fallback_host_not_found'] = 'Le courriel de l\'hôte de secours configuré ({$a}) n\'a pas été trouvé sur le compte Zoom. Contactez votre administrateur.';
 $string['apiendpoint'] = 'Point de terminaison API Zoom';
 $string['apiendpoint_desc'] = 'Choisissez le point de terminaison API Zoom que l\'activité Zoom utilisera pour se connecter.';
 $string['apiendpoint_eu'] = 'Point de terminaison API UE';
@@ -534,6 +538,7 @@ $string['download_failed'] = 'Échec du téléchargement : {$a}';
 // Tâches planifiées.
 $string['task_sync_recordings_youtube'] = 'Synchroniser les enregistrements Zoom vers YouTube';
 $string['task_sync_alternative_hosts'] = 'Synchroniser les enseignants comme hôtes alternatifs';
+$string['task_retry_transcript_downloads'] = 'Réessayer le téléchargement des transcriptions depuis YouTube';
 
 // Événements.
 $string['event_video_uploaded'] = 'Vidéo téléchargée sur YouTube';
@@ -674,3 +679,8 @@ $string['event_webhook_recording_ready'] = 'Webhook: Enregistrement prêt';
 $string['event_recording_discovered'] = 'Enregistrement découvert';
 $string['event_meeting_created'] = 'Réunion créée';
 $string['event_meeting_updated'] = 'Réunion mise à jour';
+
+// Retry upload strings.
+$string['retry_upload'] = 'Réessayer le Téléversement';
+$string['retry_upload_success'] = 'Réessai du téléversement YouTube terminé avec succès.';
+$string['retry_upload_error'] = 'Réessai du téléversement YouTube échoué: {$a}';

@@ -158,7 +158,7 @@ if ($ADMIN->fulltree) {
         'zoomyt/utmost',
         get_string('redefinelicenses', 'mod_zoomyt'),
         get_string('lowlicenses', 'mod_zoomyt'),
-        0,
+        1,
         1
     );
     $settings->add($utmost);
@@ -394,6 +394,15 @@ if ($ADMIN->fulltree) {
         0
     );
     $settings->add($autocreateusers);
+
+    // Fallback host email for teachers whose email is on another Zoom account.
+    $settings->add(new admin_setting_configtext(
+        'zoomyt/fallback_host_email',
+        get_string('fallback_host_email', 'mod_zoomyt'),
+        get_string('fallback_host_email_desc', 'mod_zoomyt'),
+        '',
+        PARAM_EMAIL
+    ));
 
     $capacitywarningchoices = [
         ZOOM_CAPACITYWARNING_DISABLE => get_string('meetingcapacitywarning_disable', 'mod_zoomyt'),

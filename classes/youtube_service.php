@@ -258,10 +258,12 @@ class youtube_service {
             return $this->accesstoken;
         }
 
-        // Check cache.
+        // Cache key includes a short hash of the refresh token so that
+        // reauthorizing (new refresh token) automatically invalidates stale tokens.
         $cache = \cache::make('mod_zoomyt', 'oauth');
-        $cachekey = 'yt_' . ($this->categoryid ?? 'global') . '_accesstoken';
-        $expireskey = 'yt_' . ($this->categoryid ?? 'global') . '_expires';
+        $rthash = substr(md5($this->refreshtoken), 0, 8);
+        $cachekey = 'yt_' . ($this->categoryid ?? 'global') . '_' . $rthash . '_accesstoken';
+        $expireskey = 'yt_' . ($this->categoryid ?? 'global') . '_' . $rthash . '_expires';
 
         $token = $cache->get($cachekey);
         $expires = $cache->get($expireskey);
@@ -290,6 +292,9 @@ class youtube_service {
         $result = json_decode($response);
 
         if (isset($result->error)) {
+            // Purge any stale cached token so a reauthorized refresh token is used next time.
+            $cache->delete($cachekey);
+            $cache->delete($expireskey);
             throw new \moodle_exception('youtube_oauth_error', 'zoomyt', '', $result->error_description ?? $result->error);
         }
 

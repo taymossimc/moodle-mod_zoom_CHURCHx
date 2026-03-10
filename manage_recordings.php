@@ -94,6 +94,27 @@ if ($action === 'syncrecordings') {
     redirect(new moodle_url('/mod/zoomyt/manage_recordings.php', ['id' => $id]));
 }
 
+// Handle retry of a single failed video upload.
+if ($action === 'retryupload' && $videoid) {
+    require_sesskey();
+    require_once($CFG->dirroot . '/mod/zoomyt/classes/task/sync_recordings_to_youtube.php');
+
+    $video = $DB->get_record('zoomyt_videos', ['id' => $videoid, 'zoomid' => $zoom->id, 'status' => 'failed'], '*', MUST_EXIST);
+
+    // Clear the error message; process_recording() will reset status to 'downloading'.
+    $DB->set_field('zoomyt_videos', 'error_message', null, ['id' => $video->id]);
+
+    try {
+        $task = new \mod_zoomyt\task\sync_recordings_to_youtube();
+        $task->execute_for_instance($zoom->id);
+        \core\notification::success(get_string('retry_upload_success', 'zoomyt'));
+    } catch (Exception $e) {
+        \core\notification::error(get_string('retry_upload_error', 'zoomyt', $e->getMessage()));
+    }
+
+    redirect(new moodle_url('/mod/zoomyt/manage_recordings.php', ['id' => $id]));
+}
+
 // Handle sync to YouTube action.
 if ($action === 'syncyoutube') {
     require_sesskey();
@@ -326,6 +347,19 @@ if (empty($videos)) {
                 'target' => '_blank',
                 'title' => get_string('view_on_youtube', 'zoomyt'),
                 'class' => 'btn btn-sm btn-outline-primary',
+            ]);
+        }
+
+        if ($video->status === 'failed') {
+            $retryurl = new moodle_url('/mod/zoomyt/manage_recordings.php', [
+                'id' => $id,
+                'action' => 'retryupload',
+                'videoid' => $video->id,
+                'sesskey' => sesskey(),
+            ]);
+            $actions[] = html_writer::link($retryurl, '<i class="fa fa-refresh"></i> ' . get_string('retry_upload', 'zoomyt'), [
+                'title' => get_string('retry_upload', 'zoomyt'),
+                'class' => 'btn btn-sm btn-outline-warning',
             ]);
         }
 

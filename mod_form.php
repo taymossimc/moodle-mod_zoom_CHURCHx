@@ -65,13 +65,15 @@ class mod_zoomyt_mod_form extends moodleform_mod {
 
         $zoomuserid = zoomyt_get_user_id(false);
 
-        // If creating a new instance, but the Zoom user does not exist.
+        // If creating a new instance, but the Zoom user does not exist,
+        // try cascading host resolution (may use fallback host account).
         if ($isnew && $zoomuserid === false) {
-            // Assume user is using Zoom for the first time.
-            $errstring = 'zoomerr_usernotfound';
-            // After they set up their account, the user should continue to the page they were on.
-            $nexturl = $PAGE->url;
-            zoomyt_fatal_error($errstring, 'mod_zoomyt', $nexturl, $config->zoomurl);
+            try {
+                $zoomuserid = zoomyt_resolve_host_for_meeting($USER->email);
+            } catch (moodle_exception $e) {
+                $nexturl = $PAGE->url;
+                zoomyt_fatal_error('zoomerr_usernotfound', 'mod_zoomyt', $nexturl, $config->zoomurl);
+            }
         }
 
         // Array of emails and proper names of Moodle users in this course that

@@ -117,6 +117,35 @@ define('ZOOM_REGISTRATION_MANUAL', 1);
 define('ZOOM_REGISTRATION_OFF', 2);
 
 /**
+ * Write a row to the zoomyt_provision_log table for diagnosing teacher provisioning.
+ *
+ * @param string $action Short label for the step being attempted.
+ * @param string $result 'ok', 'skip', or 'error'.
+ * @param string|null $message Human-readable detail or error text.
+ * @param string|null $email Email address being provisioned.
+ * @param int|null $userid Moodle user ID.
+ * @param int|null $courseid Course ID.
+ * @param int|null $meetingid Zoom meeting ID.
+ */
+function zoomyt_provision_log($action, $result, $message = null, $email = null, $userid = null, $courseid = null, $meetingid = null) {
+    global $DB;
+    try {
+        $record = new stdClass();
+        $record->timecreated = time();
+        $record->action = substr($action, 0, 100);
+        $record->result = substr($result, 0, 20);
+        $record->message = $message;
+        $record->email = $email;
+        $record->userid = $userid;
+        $record->courseid = $courseid;
+        $record->meetingid = $meetingid;
+        $DB->insert_record('zoomyt_provision_log', $record, false);
+    } catch (\Exception $e) {
+        // Never let logging break the main flow.
+    }
+}
+
+/**
  * Terminate the current script with a fatal error.
  *
  * Adapted from core_renderer's fatal_error() method. Needed because throwing errors with HTML links in them will convert links
@@ -1053,19 +1082,34 @@ function zoomyt_load_meeting($id, $context, $usestarturl = true) {
         $userapiidentifier = strtolower($userapiidentifier);
     }
     $userishost = ($userisrealhost || in_array($userapiidentifier, $alternativehosts, true));
-    $isteacher = has_capability('mod/zoomyt:addinstance', $context);
+    $isteacher = has_capability('mod/zoomyt:eligiblealternativehost', $context);
 
-    // If user is a teacher but not yet a host, provision them on-the-fly.
-    // This catches the gap between activity creation and the next cron sync.
-    if ($isteacher && !$userishost) {
+    zoomyt_provision_log('launch_check', 'ok',
+        "isteacher={$isteacher}, userishost={$userishost}, userisrealhost={$userisrealhost}, apiident={$userapiidentifier}, althosts=" . ($zoom->alternative_hosts ?? '(empty)'),
+        $USER->email, $USER->id, $zoom->course, $zoom->meeting_id);
+
+    // Provision teacher at launch time: ensure they have a Pro license and are an
+    // alternative host BEFORE redirecting to Zoom. This prevents the race condition
+    // where a teacher launches a meeting but Zoom still sees them as Basic/unlicensed.
+    if ($isteacher) {
         $config = get_config('zoomyt');
-        if (!empty($config->autoaddinstructorsashosts)) {
+        if (empty($config->autoaddinstructorsashosts)) {
+            zoomyt_provision_log('launch_provision', 'skip', 'autoaddinstructorsashosts is disabled',
+                $USER->email, $USER->id, $zoom->course, $zoom->meeting_id);
+        } else {
             $teacheremail = strtolower($USER->email);
-            debugging("ZOOMYT: Teacher {$teacheremail} joining but not yet an alternative host. Provisioning on-the-fly.", DEBUG_DEVELOPER);
+            zoomyt_provision_log('ensure_zoom_user_start', 'ok', "Calling zoomyt_ensure_zoom_user for {$teacheremail}",
+                $teacheremail, $USER->id, $zoom->course, $zoom->meeting_id);
 
-            // Ensure the teacher has a Zoom account (create + assign license if needed).
-            if (zoomyt_ensure_zoom_user($teacheremail, $zoom->course)) {
-                // Add them as an alternative host on this meeting.
+            // Step 1: Ensure teacher has a Zoom account with a Pro license.
+            $haszoomaccount = zoomyt_ensure_zoom_user($teacheremail, $zoom->course);
+
+            zoomyt_provision_log('ensure_zoom_user_result', $haszoomaccount ? 'ok' : 'error',
+                "zoomyt_ensure_zoom_user returned " . ($haszoomaccount ? 'true' : 'false'),
+                $teacheremail, $USER->id, $zoom->course, $zoom->meeting_id);
+
+            // Step 2: Add as alternative host if not already one.
+            if ($haszoomaccount && !$userishost) {
                 $existinghosts = $zoom->alternative_hosts ?? '';
                 $hostemail = null;
                 if (!empty($zoom->host_id)) {
@@ -1073,28 +1117,51 @@ function zoomyt_load_meeting($id, $context, $usestarturl = true) {
                         $hostuser = zoomyt_get_user($zoom->host_id);
                         $hostemail = $hostuser->email ?? null;
                     } catch (moodle_exception $e) {
-                        // Ignore.
+                        zoomyt_provision_log('get_host_email', 'error', $e->getMessage(),
+                            $teacheremail, $USER->id, $zoom->course, $zoom->meeting_id);
                     }
                 }
+
+                zoomyt_provision_log('merge_alt_hosts', 'ok',
+                    "existing='{$existinghosts}', hostemail='{$hostemail}', teacheremail='{$teacheremail}'",
+                    $teacheremail, $USER->id, $zoom->course, $zoom->meeting_id);
 
                 $newhosts = zoomyt_merge_alternative_hosts($existinghosts, [$teacheremail], $hostemail, $zoom->course);
 
+                zoomyt_provision_log('merge_alt_hosts_result', 'ok',
+                    "newhosts='{$newhosts}', changed=" . ($newhosts !== $existinghosts ? 'yes' : 'no'),
+                    $teacheremail, $USER->id, $zoom->course, $zoom->meeting_id);
+
                 if ($newhosts !== $existinghosts) {
-                    // Update on Zoom.
                     if (zoomyt_update_meeting_alternative_hosts($zoom, $newhosts)) {
-                        // Update local DB.
                         $DB->set_field('zoomyt', 'alternative_hosts', $newhosts, ['id' => $zoom->id]);
                         $zoom->alternative_hosts = $newhosts;
 
-                        // Re-evaluate host status.
                         $alternativehosts = zoomyt_get_alternative_host_array_from_string($newhosts);
                         $userishost = ($userisrealhost || in_array($userapiidentifier, $alternativehosts, true));
 
-                        debugging("ZOOMYT: Teacher {$teacheremail} provisioned as alternative host on-the-fly. userishost={$userishost}", DEBUG_DEVELOPER);
+                        zoomyt_provision_log('update_alt_hosts', 'ok',
+                            "Updated on Zoom. userishost now={$userishost}",
+                            $teacheremail, $USER->id, $zoom->course, $zoom->meeting_id);
+                    } else {
+                        zoomyt_provision_log('update_alt_hosts', 'error',
+                            'zoomyt_update_meeting_alternative_hosts returned false',
+                            $teacheremail, $USER->id, $zoom->course, $zoom->meeting_id);
                     }
                 }
+            } else if (!$haszoomaccount) {
+                zoomyt_provision_log('launch_provision', 'error',
+                    'Skipping alt host — could not ensure Zoom account',
+                    $teacheremail, $USER->id, $zoom->course, $zoom->meeting_id);
+            } else {
+                zoomyt_provision_log('launch_provision', 'skip',
+                    'Teacher is already an alternative host',
+                    $teacheremail, $USER->id, $zoom->course, $zoom->meeting_id);
             }
         }
+    } else {
+        zoomyt_provision_log('launch_provision', 'skip', 'User does not have eligiblealternativehost capability',
+            $USER->email, $USER->id, $zoom->course, $zoom->meeting_id);
     }
 
     // Get meeting state with user role context.
@@ -1121,8 +1188,11 @@ function zoomyt_load_meeting($id, $context, $usestarturl = true) {
     }
 
     // Check if we should use the start meeting url.
-    if ($userisrealhost && $usestarturl) {
-        // Important: Only the real host can use this URL, because it joins the meeting as the host user.
+    // Teachers get the start_url (full host control) even if they're not the "real host"
+    // (e.g., when a fallback host account was used to create the meeting).
+    if (($userisrealhost || $isteacher) && $usestarturl) {
+        // If the meeting uses the fallback host, rename it to match the teacher.
+        zoomyt_rename_host_for_teacher($zoom->host_id, $USER);
         $starturl = zoomyt_get_start_url($zoom->meeting_id, $zoom->webinar, $zoom->join_url);
         $returns['nexturl'] = new moodle_url($starturl);
     } else {
@@ -1523,8 +1593,8 @@ function zoomyt_get_user_display_name($zoomuserid) {
 function zoomyt_get_course_instructor_emails($courseid, $excludeuserid = null) {
     $context = context_course::instance($courseid);
 
-    // Get users who can add zoom instances - these are typically instructors.
-    $users = get_enrolled_users($context, 'mod/zoomyt:addinstance', 0, 'u.id, u.email', 'u.lastname');
+    // Get users eligible to be alternative hosts (teachers + editing teachers).
+    $users = get_enrolled_users($context, 'mod/zoomyt:eligiblealternativehost', 0, 'u.id, u.email', 'u.lastname');
 
     $emails = [];
     foreach ($users as $user) {
@@ -1576,28 +1646,39 @@ function zoomyt_user_exists_on_zoom($email) {
 function zoomyt_ensure_zoom_user($email, $courseid) {
     global $DB;
 
-    $service = zoomyt_webservice();
+    zoomyt_provision_log('ensure_user_begin', 'ok', "Looking up {$email} on Zoom", $email, null, $courseid);
+
+    try {
+        $service = zoomyt_webservice();
+    } catch (moodle_exception $e) {
+        zoomyt_provision_log('ensure_user_webservice', 'error',
+            'Could not init webservice: ' . $e->getMessage(), $email, null, $courseid);
+        return false;
+    }
 
     // First check if user already exists on Zoom.
     $existinguser = null;
     try {
         $existinguser = $service->get_user($email);
     } catch (\mod_zoomyt\not_found_exception $e) {
-        // User doesn't exist - this is expected, we'll create them below.
         $existinguser = null;
+        zoomyt_provision_log('zoom_user_lookup', 'ok', 'User not found on Zoom (expected, will create)', $email, null, $courseid);
     } catch (moodle_exception $e) {
-        debugging("ZOOMYT: Error checking Zoom user {$email}: " . $e->getMessage(), DEBUG_DEVELOPER);
+        zoomyt_provision_log('zoom_user_lookup', 'error',
+            'API error looking up user: ' . $e->getMessage(), $email, null, $courseid);
         return false;
     }
 
     if (!empty($existinguser)) {
-        // User exists on Zoom. Ensure they have a license via the recycling logic.
         $zoomuserid = $existinguser->id;
+        $usertype = $existinguser->type ?? 'unknown';
+        zoomyt_provision_log('zoom_user_lookup', 'ok',
+            "User exists on Zoom. zoomid={$zoomuserid}, type={$usertype}", $email, null, $courseid);
         try {
             $service->provide_license($zoomuserid);
-            debugging("ZOOMYT: Existing Zoom user {$email} - ensured license is assigned.", DEBUG_DEVELOPER);
+            zoomyt_provision_log('provide_license', 'ok', 'License ensured for existing user', $email, null, $courseid);
         } catch (\Exception $e) {
-            debugging("ZOOMYT: Could not assign license to {$email}: " . $e->getMessage(), DEBUG_DEVELOPER);
+            zoomyt_provision_log('provide_license', 'error', $e->getMessage(), $email, null, $courseid);
         }
         return true;
     }
@@ -1605,39 +1686,306 @@ function zoomyt_ensure_zoom_user($email, $courseid) {
     // Check if auto-creating users is enabled.
     $config = get_config('zoomyt');
     if (empty($config->autocreatezoomusers)) {
-        debugging("ZOOMYT: User {$email} not on Zoom and auto-create is disabled.", DEBUG_DEVELOPER);
+        zoomyt_provision_log('autocreate_check', 'skip',
+            'autocreatezoomusers is disabled — cannot create Zoom account', $email, null, $courseid);
         return false;
     }
 
-    // User doesn't exist - try to add them to the Zoom account.
     // Look up the Moodle user record to get their name.
     $moodleuser = $DB->get_record('user', ['email' => $email], 'id, email, firstname, lastname');
     if (!$moodleuser) {
-        debugging("ZOOMYT: Cannot add {$email} to Zoom - no matching Moodle user found.", DEBUG_DEVELOPER);
+        zoomyt_provision_log('moodle_user_lookup', 'error',
+            'No Moodle user found with this email', $email, null, $courseid);
+        return false;
+    }
+
+    zoomyt_provision_log('autocreate_user', 'ok',
+        "Creating Zoom user: {$moodleuser->firstname} {$moodleuser->lastname}", $email, $moodleuser->id, $courseid);
+
+    // Try autoCreate first (instant, no email confirmation needed).
+    // Falls back to create (sends invitation email) if autoCreate fails
+    // due to managed domain restrictions (common on Pro plans).
+    $created = false;
+    $createmethod = 'autoCreate';
+
+    try {
+        $service->autocreate_user($moodleuser, 'autoCreate', ZOOM_USER_TYPE_BASIC);
+        $created = true;
+        zoomyt_provision_log('autocreate_user_result', 'ok',
+            'Zoom user created via autoCreate', $email, $moodleuser->id, $courseid);
+    } catch (moodle_exception $e) {
+        $msg = $e->getMessage();
+
+        if (strpos($msg, 'already in the account') !== false) {
+            zoomyt_provision_log('autocreate_user_result', 'ok',
+                'User already in this Zoom account — treating as success', $email, $moodleuser->id, $courseid);
+            return true;
+        }
+
+        // "Already been used" means the email is registered on a DIFFERENT Zoom account.
+        // We cannot add them to this account or use them as an alternative host.
+        if (strpos($msg, 'already been used') !== false) {
+            zoomyt_provision_log('autocreate_user_result', 'skip',
+                'Email is registered on another Zoom account — cannot add to this account',
+                $email, $moodleuser->id, $courseid);
+            return false;
+        }
+
+        // Domain mismatch (error 1116) or other restriction — fall back to create (invitation).
+        $isdomain = (strpos($msg, 'Domain') !== false || strpos($msg, '1116') !== false);
+        zoomyt_provision_log('autocreate_fallback', $isdomain ? 'ok' : 'error',
+            "autoCreate failed: {$msg}. " . ($isdomain ? 'Falling back to create (invitation).' : 'Attempting create fallback.'),
+            $email, $moodleuser->id, $courseid);
+
+        try {
+            $service->autocreate_user($moodleuser, 'create', ZOOM_USER_TYPE_BASIC);
+            $created = true;
+            $createmethod = 'create';
+            zoomyt_provision_log('create_user_result', 'ok',
+                'Zoom invitation sent via create action — teacher must accept email to activate',
+                $email, $moodleuser->id, $courseid);
+        } catch (moodle_exception $e2) {
+            $msg2 = $e2->getMessage();
+            if (strpos($msg2, 'already in the account') !== false) {
+                zoomyt_provision_log('create_user_result', 'ok',
+                    'User already in this Zoom account — treating as success', $email, $moodleuser->id, $courseid);
+                return true;
+            }
+            zoomyt_provision_log('create_user_result', 'error',
+                'Both autoCreate and create failed: ' . $msg2, $email, $moodleuser->id, $courseid);
+            return false;
+        }
+    }
+
+    if (!$created) {
+        return false;
+    }
+
+    // Fetch the newly created user and check their status.
+    try {
+        $newuser = $service->get_user($email);
+        if (empty($newuser)) {
+            zoomyt_provision_log('get_new_user', 'error',
+                'Could not fetch newly created user from Zoom', $email, $moodleuser->id, $courseid);
+            return false;
+        }
+
+        $userstatus = $newuser->status ?? 'unknown';
+        zoomyt_provision_log('new_user_status', 'ok',
+            "New user zoomid={$newuser->id} (via {$createmethod}), status={$userstatus}, type={$newuser->type}",
+            $email, $moodleuser->id, $courseid);
+
+        // Pending users (created via invitation) haven't accepted yet.
+        // They can't be used as alternative hosts until they activate their account.
+        if ($userstatus === 'pending') {
+            zoomyt_provision_log('pending_user', 'skip',
+                'User is pending (invitation sent). Cannot be alt host until they accept. '
+                . 'The scheduled sync task will add them once active.',
+                $email, $moodleuser->id, $courseid);
+            return false;
+        }
+
+        // Assign a Pro license for active users.
+        zoomyt_provision_log('provide_license', 'ok',
+            "Upgrading user to Pro", $email, $moodleuser->id, $courseid);
+        $service->provide_license($newuser->id);
+        zoomyt_provision_log('provide_license_result', 'ok', 'Pro license assigned', $email, $moodleuser->id, $courseid);
+    } catch (\Exception $e) {
+        zoomyt_provision_log('provide_license', 'error',
+            "License assignment after {$createmethod}: " . $e->getMessage(), $email, $moodleuser->id, $courseid);
+    }
+
+    return true;
+}
+
+/**
+ * Look up the Zoom user ID for the fallback host account.
+ *
+ * @return string|false The Zoom user ID, or false if not configured/found.
+ */
+function zoomyt_get_fallback_host_id() {
+    static $fallbackid = null;
+    if ($fallbackid !== null) {
+        return $fallbackid ?: false;
+    }
+
+    $fallbackemail = get_config('zoomyt', 'fallback_host_email');
+    if (empty($fallbackemail)) {
+        $fallbackid = '';
         return false;
     }
 
     try {
-        // Create as Basic first (autoCreate sends an invite/adds to account).
-        $service->autocreate_user($moodleuser, 'autoCreate', ZOOM_USER_TYPE_BASIC);
-        debugging("ZOOMYT: Created Zoom user for {$email}", DEBUG_DEVELOPER);
-
-        // Now upgrade them to Pro using the license recycling logic.
-        // We need to fetch the newly created user to get their Zoom user ID.
-        $newuser = $service->get_user($email);
-        if (!empty($newuser)) {
-            $service->provide_license($newuser->id);
-            debugging("ZOOMYT: Assigned Pro license to new Zoom user {$email}", DEBUG_DEVELOPER);
+        $service = zoomyt_webservice();
+        $user = $service->get_user($fallbackemail);
+        if (!empty($user) && !empty($user->id)) {
+            $fallbackid = $user->id;
+            return $fallbackid;
         }
+    } catch (\Exception $e) {
+        zoomyt_provision_log('fallback_host_lookup', 'error',
+            'Could not look up fallback host: ' . $e->getMessage(), $fallbackemail);
+    }
 
-        return true;
+    $fallbackid = '';
+    return false;
+}
+
+/**
+ * Resolve which Zoom user ID should host a meeting, with cascading fallback.
+ *
+ * Tries the teacher's own Zoom identity first. If they're on another Zoom account,
+ * still pending, or can't be created, falls back to a configurable generic host account.
+ *
+ * @param string $useremail The Moodle user's email.
+ * @return string The Zoom user ID to use as meeting host.
+ * @throws moodle_exception If neither the user nor fallback can be resolved.
+ */
+function zoomyt_resolve_host_for_meeting($useremail) {
+    try {
+        $service = zoomyt_webservice();
     } catch (moodle_exception $e) {
-        // Check if error indicates user already exists (race condition).
-        if (strpos($e->getMessage(), 'already in the account') !== false) {
-            return true;
+        throw new moodle_exception('errorwebservice', 'mod_zoomyt', '', null, $e->getMessage());
+    }
+
+    // Step 1: Check if the user already exists on this Zoom account.
+    try {
+        $existinguser = $service->get_user($useremail);
+        if (!empty($existinguser) && !empty($existinguser->id)) {
+            $status = $existinguser->status ?? 'unknown';
+            if ($status === 'active') {
+                zoomyt_provision_log('resolve_host', 'ok',
+                    "Teacher exists on Zoom and is active, using as host. zoomid={$existinguser->id}",
+                    $useremail);
+                return $existinguser->id;
+            }
+            // Pending user — can't host, use fallback.
+            zoomyt_provision_log('resolve_host', 'skip',
+                "Teacher exists on Zoom but is {$status} — using fallback host", $useremail);
+            return zoomyt_require_fallback_host($useremail);
         }
-        debugging("ZOOMYT: Failed to create Zoom user for {$email}: " . $e->getMessage(), DEBUG_DEVELOPER);
-        return false;
+    } catch (\mod_zoomyt\not_found_exception $e) {
+        // Not found — continue to creation attempt.
+    } catch (moodle_exception $e) {
+        zoomyt_provision_log('resolve_host', 'error',
+            'API error looking up teacher: ' . $e->getMessage(), $useremail);
+        return zoomyt_require_fallback_host($useremail);
+    }
+
+    // Step 2: User not on this account. Try to create them.
+    $config = get_config('zoomyt');
+    if (!empty($config->autocreatezoomusers)) {
+        global $DB;
+        $moodleuser = $DB->get_record('user', ['email' => $useremail], 'id, email, firstname, lastname');
+        if ($moodleuser) {
+            try {
+                $service->autocreate_user($moodleuser, 'autoCreate', ZOOM_USER_TYPE_BASIC);
+                zoomyt_provision_log('resolve_host_create', 'ok', 'User created via autoCreate', $useremail);
+            } catch (moodle_exception $e) {
+                $msg = $e->getMessage();
+                if (strpos($msg, 'already in the account') !== false) {
+                    // Race condition — user was just created. Look them up again.
+                    try {
+                        $user = $service->get_user($useremail);
+                        if (!empty($user) && ($user->status ?? '') === 'active') {
+                            return $user->id;
+                        }
+                    } catch (\Exception $e2) {
+                        // Fall through to fallback.
+                    }
+                    return zoomyt_require_fallback_host($useremail);
+                }
+                if (strpos($msg, 'already been used') !== false) {
+                    zoomyt_provision_log('resolve_host_create', 'skip',
+                        'Email is on another Zoom account — using fallback', $useremail);
+                    return zoomyt_require_fallback_host($useremail);
+                }
+
+                // Domain mismatch — try create (invitation) fallback.
+                try {
+                    $service->autocreate_user($moodleuser, 'create', ZOOM_USER_TYPE_BASIC);
+                    zoomyt_provision_log('resolve_host_create', 'ok',
+                        'User created via invitation — checking status', $useremail);
+                } catch (moodle_exception $e2) {
+                    $msg2 = $e2->getMessage();
+                    if (strpos($msg2, 'already in the account') !== false || strpos($msg2, 'already been used') !== false) {
+                        return zoomyt_require_fallback_host($useremail);
+                    }
+                    zoomyt_provision_log('resolve_host_create', 'error',
+                        'Both autoCreate and create failed: ' . $msg2, $useremail);
+                    return zoomyt_require_fallback_host($useremail);
+                }
+            }
+
+            // Check the newly created user's status.
+            try {
+                $newuser = $service->get_user($useremail);
+                if (!empty($newuser) && ($newuser->status ?? '') === 'active') {
+                    $service->provide_license($newuser->id);
+                    return $newuser->id;
+                }
+                // Pending — use fallback.
+                zoomyt_provision_log('resolve_host_create', 'skip',
+                    'Newly created user is pending — using fallback', $useremail);
+                return zoomyt_require_fallback_host($useremail);
+            } catch (\Exception $e) {
+                return zoomyt_require_fallback_host($useremail);
+            }
+        }
+    }
+
+    // Could not create user — use fallback.
+    return zoomyt_require_fallback_host($useremail);
+}
+
+/**
+ * Get the fallback host Zoom user ID, or throw if not configured.
+ *
+ * @param string $useremail The teacher's email (for logging).
+ * @return string The fallback host's Zoom user ID.
+ * @throws moodle_exception If fallback host is not configured or not found.
+ */
+function zoomyt_require_fallback_host($useremail) {
+    $fallbackemail = get_config('zoomyt', 'fallback_host_email');
+    if (empty($fallbackemail)) {
+        throw new moodle_exception('fallback_host_not_configured', 'mod_zoomyt');
+    }
+
+    $fallbackid = zoomyt_get_fallback_host_id();
+    if (!$fallbackid) {
+        throw new moodle_exception('fallback_host_not_found', 'mod_zoomyt', '', $fallbackemail);
+    }
+
+    zoomyt_provision_log('fallback_host', 'ok',
+        "Using fallback host {$fallbackemail} (zoomid={$fallbackid})", $useremail);
+    return $fallbackid;
+}
+
+/**
+ * Rename the fallback Zoom host account to match a teacher's name.
+ *
+ * Only renames if the meeting's host_id matches the fallback host account.
+ * This makes the teacher appear under their own name when they join via start_url.
+ *
+ * @param string $hostid The meeting's current host Zoom user ID.
+ * @param stdClass $moodleuser The Moodle user object (needs firstname, lastname).
+ * @return void
+ */
+function zoomyt_rename_host_for_teacher($hostid, $moodleuser) {
+    $fallbackid = zoomyt_get_fallback_host_id();
+    if (!$fallbackid || $hostid !== $fallbackid) {
+        return;
+    }
+
+    try {
+        $service = zoomyt_webservice();
+        $displayname = trim($moodleuser->firstname . ' ' . $moodleuser->lastname);
+        $service->update_user_name($fallbackid, $moodleuser->firstname, $moodleuser->lastname, $displayname);
+        zoomyt_provision_log('rename_host', 'ok',
+            "Renamed fallback host to {$displayname}", $moodleuser->email, $moodleuser->id);
+    } catch (\Exception $e) {
+        zoomyt_provision_log('rename_host', 'error',
+            'Failed to rename fallback host: ' . $e->getMessage(), $moodleuser->email, $moodleuser->id);
     }
 }
 
@@ -1723,14 +2071,8 @@ function zoomyt_update_meeting_alternative_hosts($zoom, $alternativehosts) {
     try {
         $service = zoomyt_webservice();
 
-        // Update the meeting with the new alternative hosts.
-        $updatedata = new stdClass();
-        $updatedata->meeting_id = $zoom->meeting_id;
-        $updatedata->webinar = $zoom->webinar ?? false;
-        $updatedata->alternative_hosts = $alternativehosts;
-
-        // Call the update meeting method.
-        $service->update_meeting($updatedata);
+        // Targeted PATCH that only updates alternative hosts.
+        $service->update_meeting_hosts($zoom->meeting_id, $zoom->webinar ?? false, $alternativehosts);
 
         debugging("ZOOMYT: Updated alternative hosts for meeting {$zoom->meeting_id}: {$alternativehosts}", DEBUG_DEVELOPER);
         return true;
@@ -1738,4 +2080,104 @@ function zoomyt_update_meeting_alternative_hosts($zoom, $alternativehosts) {
         debugging("ZOOMYT: Failed to update alternative hosts for meeting {$zoom->meeting_id}: " . $e->getMessage(), DEBUG_DEVELOPER);
         return false;
     }
+}
+
+/**
+ * Extract a problematic email from a Zoom alt-host error message.
+ *
+ * Zoom returns errors like:
+ *   'Unable to assign "foo@bar.com" as an alternative host because ...'
+ *
+ * @param string $message The error message from the Zoom API.
+ * @return string|null The extracted email, or null if not found.
+ */
+function zoomyt_extract_bad_alt_host_email($message) {
+    if (preg_match('/Unable to assign "([^"]+)" as an alternative host/', $message, $matches)) {
+        return strtolower($matches[1]);
+    }
+    return null;
+}
+
+/**
+ * Remove a specific email from a comma-separated alternative hosts string.
+ *
+ * @param string $althosts Comma-separated list of alternative host emails.
+ * @param string $email The email to remove.
+ * @return string Updated comma-separated list.
+ */
+function zoomyt_remove_alt_host($althosts, $email) {
+    $hosts = array_map('trim', explode(',', $althosts));
+    $hosts = array_filter($hosts, function ($h) use ($email) {
+        return strtolower($h) !== strtolower($email);
+    });
+    return implode(',', $hosts);
+}
+
+/**
+ * Create a meeting on Zoom, retrying without problematic alternative hosts.
+ *
+ * If Zoom rejects an alternative host (pending, unlicensed, external account),
+ * that host is stripped and the request is retried. This prevents alt host issues
+ * from blocking meeting creation. The scheduled sync task will re-add valid hosts later.
+ *
+ * @param stdClass $zoom The meeting object (alternative_hosts may be modified).
+ * @return stdClass The Zoom API response.
+ * @throws moodle_exception If the meeting creation fails for non-alt-host reasons.
+ */
+function zoomyt_create_meeting_with_alt_host_retry($zoom) {
+    $service = zoomyt_webservice();
+    $maxretries = 5;
+
+    for ($attempt = 0; $attempt <= $maxretries; $attempt++) {
+        try {
+            return $service->create_meeting($zoom, $zoom->coursemodule);
+        } catch (moodle_exception $e) {
+            $bademail = zoomyt_extract_bad_alt_host_email($e->getMessage());
+            if ($bademail === null || empty($zoom->alternative_hosts)) {
+                throw $e;
+            }
+
+            zoomyt_provision_log('alt_host_retry', 'skip',
+                "Removing invalid alt host {$bademail}: " . $e->getMessage(),
+                $bademail, null, $zoom->course ?? null);
+
+            $zoom->alternative_hosts = zoomyt_remove_alt_host($zoom->alternative_hosts, $bademail);
+        }
+    }
+
+    return $service->create_meeting($zoom, $zoom->coursemodule);
+}
+
+/**
+ * Update a meeting on Zoom, retrying without problematic alternative hosts.
+ *
+ * @param stdClass $zoom The meeting object (alternative_hosts may be modified).
+ * @return void
+ * @throws moodle_exception If the update fails for non-alt-host reasons.
+ */
+function zoomyt_update_meeting_with_alt_host_retry($zoom) {
+    global $DB;
+    $service = zoomyt_webservice();
+    $maxretries = 5;
+
+    for ($attempt = 0; $attempt <= $maxretries; $attempt++) {
+        try {
+            $service->update_meeting($zoom, $zoom->coursemodule);
+            return;
+        } catch (moodle_exception $e) {
+            $bademail = zoomyt_extract_bad_alt_host_email($e->getMessage());
+            if ($bademail === null || empty($zoom->alternative_hosts)) {
+                throw $e;
+            }
+
+            zoomyt_provision_log('alt_host_retry', 'skip',
+                "Removing invalid alt host {$bademail}: " . $e->getMessage(),
+                $bademail, null, $zoom->course ?? null);
+
+            $zoom->alternative_hosts = zoomyt_remove_alt_host($zoom->alternative_hosts, $bademail);
+            $DB->set_field('zoomyt', 'alternative_hosts', $zoom->alternative_hosts, ['id' => $zoom->id]);
+        }
+    }
+
+    $service->update_meeting($zoom, $zoom->coursemodule);
 }

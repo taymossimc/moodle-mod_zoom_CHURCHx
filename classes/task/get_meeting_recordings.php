@@ -52,8 +52,12 @@ class get_meeting_recordings extends scheduled_task {
      * @return void
      */
     public function execute() {
-        // Check for custom data (when run as adhoc task from webhook).
-        $customdata = $this->get_custom_data();
+        // get_custom_data() is only available on adhoc_task, not scheduled_task.
+        $customdata = null;
+        if (method_exists($this, 'get_custom_data')) {
+            $customdata = $this->get_custom_data();
+        }
+
         if (!empty($customdata->instance_id)) {
             mtrace('Recording fetch triggered by webhook for instance: ' . $customdata->instance_id);
             $this->execute_for_instance((int)$customdata->instance_id);

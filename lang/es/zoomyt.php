@@ -52,6 +52,10 @@ $string['autoaddinstructorsashosts'] = 'Agregar automáticamente instructores de
 $string['autoaddinstructorsashosts_desc'] = 'Cuando está habilitado, todos los instructores del curso (usuarios con capacidad para agregar actividades de Zoom) serán agregados automáticamente como anfitriones alternativos cuando se crea o actualiza una reunión de Zoom. Esto asegura que cualquier instructor del curso pueda iniciar y dirigir reuniones, independientemente de quién creó la actividad originalmente.';
 $string['autocreatezoomusers'] = 'Crear automáticamente cuentas de Zoom para instructores';
 $string['autocreatezoomusers_desc'] = 'Cuando está habilitado, los instructores que aún no tienen una cuenta de Zoom serán agregados automáticamente a su cuenta de Zoom y se les asignará una licencia Pro (utilizando la lógica de reciclaje de licencias para liberar una licencia si es necesario). Cuando está deshabilitado, solo los instructores que ya tienen una cuenta de Zoom serán agregados como anfitriones alternativos.';
+$string['fallback_host_email'] = 'Correo electrónico del anfitrión de respaldo';
+$string['fallback_host_email_desc'] = 'Correo electrónico de un usuario de Zoom con licencia en su cuenta para usar como anfitrión de la reunión cuando el correo electrónico del profesor no está disponible (por ejemplo, registrado en otra organización de Zoom o con invitación pendiente). El profesor seguirá uniéndose con control total de anfitrión a través de la URL de inicio, y el nombre para mostrar de la cuenta de respaldo se cambiará temporalmente para coincidir con el nombre del profesor.';
+$string['fallback_host_not_configured'] = 'Su correo electrónico no está disponible en esta cuenta de Zoom y no se ha configurado un anfitrión de respaldo. Contacte a su administrador.';
+$string['fallback_host_not_found'] = 'El correo electrónico del anfitrión de respaldo configurado ({$a}) no se encontró en la cuenta de Zoom. Contacte a su administrador.';
 $string['apiendpoint'] = 'Punto de acceso API de Zoom';
 $string['apiendpoint_desc'] = 'Elija qué punto de acceso API de Zoom utilizará la actividad Zoom para conectarse.';
 $string['apiendpoint_eu'] = 'Punto de acceso API UE';
@@ -534,6 +538,7 @@ $string['download_failed'] = 'Error en la descarga: {$a}';
 // Tareas programadas.
 $string['task_sync_recordings_youtube'] = 'Sincronizar grabaciones de Zoom a YouTube';
 $string['task_sync_alternative_hosts'] = 'Sincronizar instructores del curso como anfitriones alternativos';
+$string['task_retry_transcript_downloads'] = 'Reintentar la descarga de transcripciones desde YouTube';
 
 // Eventos.
 $string['event_video_uploaded'] = 'Video cargado a YouTube';
@@ -674,3 +679,8 @@ $string['event_webhook_recording_ready'] = 'Webhook: Grabación lista';
 $string['event_recording_discovered'] = 'Grabación descubierta';
 $string['event_meeting_created'] = 'Reunión creada';
 $string['event_meeting_updated'] = 'Reunión actualizada';
+
+// Retry upload strings.
+$string['retry_upload'] = 'Reintentar Subida';
+$string['retry_upload_success'] = 'Reintento de subida a YouTube completado exitosamente.';
+$string['retry_upload_error'] = 'Reintento de subida a YouTube falló: {$a}';

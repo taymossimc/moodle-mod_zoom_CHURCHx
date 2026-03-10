@@ -97,4 +97,13 @@ $tasks = [
         'dayofweek' => '*',
         'month' => '*',
     ],
+    [
+        'classname' => 'mod_zoomyt\task\retry_transcript_downloads',
+        'blocking' => 0,
+        'minute' => '45',
+        'hour' => '*/3',
+        'day' => '*',
+        'dayofweek' => '*',
+        'month' => '*',
+    ],
 ];

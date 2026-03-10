@@ -174,12 +174,28 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
 
                 // Download transcripts.
                 $result = $ytservice->download_and_store_transcripts($video->id, $cm->id);
+
+                // Record the attempt for retry tracking.
+                $retrycount = (int)($video->transcript_retry_count ?? 0);
+                $DB->execute(
+                    "UPDATE {zoomyt_videos}
+                        SET transcript_retry_count = :retrycount,
+                            transcript_last_attempt = :lastattempt
+                      WHERE id = :id",
+                    [
+                        'retrycount' => $retrycount + 1,
+                        'lastattempt' => time(),
+                        'id' => $video->id,
+                    ]
+                );
+
                 if ($result) {
                     mtrace('  Downloaded transcripts for video: ' . $video->title);
                 } else {
-                    // No transcripts available yet - mark as attempted so we don't keep trying.
-                    // YouTube may still be processing captions.
-                    mtrace('  No transcripts available yet for: ' . $video->title);
+                    // No transcripts available yet - the retry_transcript_downloads task
+                    // will pick this up later with backoff.
+                    mtrace('  No transcripts available yet for: ' . $video->title .
+                           ' (retry task will try again later)');
                 }
             } catch (\Exception $e) {
                 mtrace('  Error syncing transcripts for video ' . $video->id . ': ' . $e->getMessage());
@@ -230,13 +246,16 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
             $params['instanceid'] = $instanceid;
         }
 
+        // Exclude recordings that already have a successfully uploaded video.
         $sql = "SELECT zmr.*, z.id as zoomid, z.course, z.name as session_name,
                        zmd.start_time as session_time
                 FROM {zoomyt_meeting_recordings} zmr
                 JOIN {zoomyt} z ON z.id = zmr.zoomid
                 JOIN {zoomyt_meeting_details} zmd ON zmd.uuid = zmr.meetinguuid
-                LEFT JOIN {zoomyt_videos} zyv ON zyv.recordingid = zmr.id
-                WHERE zyv.id IS NULL
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM {zoomyt_videos} zyv
+                    WHERE zyv.recordingid = zmr.id AND zyv.status = 'uploaded'
+                )
                   AND (zmr.recordingtype IN ('active_speaker', 'shared_screen_with_speaker_view', 
                                              'shared_screen_with_gallery_view', 'gallery_view')
                        OR zmr.recordingtype LIKE 'shared_screen_with_speaker_view%'
@@ -315,26 +334,56 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
         // Get course for visibility settings.
         $course = $DB->get_record('course', ['id' => $recording->course], 'id, category', MUST_EXIST);
 
-        // Create pending video record.
-        $video = new \stdClass();
-        $video->zoomid = $recording->zoomid;
-        $video->recordingid = $recording->id;
-        $video->meetinguuid = $recording->meetinguuid;
-        $video->zoom_recording_id = $recording->zoomrecordingid;
-        $video->title = $recording->session_name;
-        $video->description = 'Recorded session from ' . userdate($recording->session_time);
-        $video->zoom_session_time = $recording->session_time;
-        $video->status = 'downloading';
-        $video->timecreated = time();
-        $video->timemodified = time();
+        // Reuse any existing video record for this recording to prevent duplicates.
+        $existingvideos = $DB->get_records('zoomyt_videos', ['recordingid' => $recording->id], 'id ASC');
+        $video = null;
 
-        // Get visibility setting.
-        $catsettings = new \mod_zoomyt\category_settings($course->category);
-        $settings = $catsettings->get_effective_settings();
-        $video->visibility = $settings->yt_default_visibility ?? get_config('zoomyt', 'youtube_default_visibility') ?? 'unlisted';
+        if (!empty($existingvideos)) {
+            // If there's already an uploaded copy, skip entirely.
+            foreach ($existingvideos as $ev) {
+                if ($ev->status === 'uploaded') {
+                    mtrace('  Already uploaded (video ID: ' . $ev->id . '), skipping.');
+                    return;
+                }
+            }
 
-        $videoid = $DB->insert_record('zoomyt_videos', $video);
-        $video->id = $videoid;
+            // Reuse the first non-uploaded record; delete any extra duplicates.
+            $first = true;
+            foreach ($existingvideos as $ev) {
+                if ($first) {
+                    $video = $ev;
+                    $first = false;
+                } else {
+                    mtrace('  Removing duplicate video record ID: ' . $ev->id);
+                    $DB->delete_records('zoomyt_videos', ['id' => $ev->id]);
+                }
+            }
+
+            mtrace('  Retrying previously failed upload (video ID: ' . $video->id . ')');
+            $video->status = 'downloading';
+            $video->error_message = null;
+            $video->timemodified = time();
+            $DB->update_record('zoomyt_videos', $video);
+        } else {
+            $video = new \stdClass();
+            $video->zoomid = $recording->zoomid;
+            $video->recordingid = $recording->id;
+            $video->meetinguuid = $recording->meetinguuid;
+            $video->zoom_recording_id = $recording->zoomrecordingid;
+            $video->title = $recording->session_name;
+            $video->description = 'Recorded session from ' . userdate($recording->session_time);
+            $video->zoom_session_time = $recording->session_time;
+            $video->status = 'downloading';
+            $video->timecreated = time();
+            $video->timemodified = time();
+
+            $catsettings = new \mod_zoomyt\category_settings($course->category);
+            $settings = $catsettings->get_effective_settings();
+            $video->visibility = $settings->yt_default_visibility ?? get_config('zoomyt', 'youtube_default_visibility') ?? 'unlisted';
+
+            $videoid = $DB->insert_record('zoomyt_videos', $video);
+            $video->id = $videoid;
+        }
 
         // Download the recording.
         mtrace('  Downloading from Zoom...');

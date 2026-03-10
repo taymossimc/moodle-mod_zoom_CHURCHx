@@ -204,7 +204,8 @@ if (!$showrecreate && $config->showcapacitywarning == true) {
 
 // Get meeting state from Zoom - pass user role for different early access times.
 $isteacher = has_capability('mod/zoomyt:addinstance', $context);
-[$inprogress, $available, $finished] = zoomyt_get_state($zoom, $userishost, $isteacher);
+$iseligiblehost = has_capability('mod/zoomyt:eligiblealternativehost', $context);
+[$inprogress, $available, $finished] = zoomyt_get_state($zoom, $userishost || $iseligiblehost, $isteacher);
 
 // Show join meeting button or unavailability note.
 if (!$showrecreate) {
@@ -220,7 +221,9 @@ if (!$showrecreate) {
 
     if ($available) {
         // Show join meeting button.
-        if ($userishost) {
+        // Teachers with eligiblealternativehost get the green "Start Meeting" button
+        // because they'll receive the start_url with full host control.
+        if ($userishost || $iseligiblehost) {
             $buttonhtml = html_writer::tag('button', $strstart, ['type' => 'submit', 'class' => 'btn btn-success']);
         } else {
             $btntext = $strjoin;

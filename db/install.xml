@@ -262,6 +262,8 @@
         <FIELD NAME="timemodified" TYPE="int" LENGTH="12" NOTNULL="true" SEQUENCE="false"/>
         <FIELD NAME="caption_languages" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false" COMMENT="Comma-separated list of caption language codes (e.g., en,fr,es)."/>
         <FIELD NAME="transcript_downloaded" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Whether transcript files have been downloaded."/>
+        <FIELD NAME="transcript_retry_count" TYPE="int" LENGTH="3" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Number of transcript download attempts."/>
+        <FIELD NAME="transcript_last_attempt" TYPE="int" LENGTH="12" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Timestamp of last transcript download attempt."/>
       </FIELDS>
       <KEYS>
         <KEY NAME="id_primary" TYPE="primary" FIELDS="id"/>
@@ -310,6 +312,25 @@
         <KEY NAME="fk_videoid" TYPE="foreign" FIELDS="videoid" REFTABLE="zoomyt_videos" REFFIELDS="id"/>
         <KEY NAME="videoid_userid_unique" TYPE="unique" FIELDS="videoid, userid"/>
       </KEYS>
+    </TABLE>
+    <TABLE NAME="zoomyt_provision_log" COMMENT="Diagnostic log for teacher provisioning and license assignment.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="12" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Moodle user ID being provisioned."/>
+        <FIELD NAME="email" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Email address used for Zoom lookup."/>
+        <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="meetingid" TYPE="int" LENGTH="15" NOTNULL="false" SEQUENCE="false" COMMENT="Zoom meeting ID."/>
+        <FIELD NAME="action" TYPE="char" LENGTH="100" NOTNULL="true" SEQUENCE="false" COMMENT="What step was attempted."/>
+        <FIELD NAME="result" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="ok, skip, or error."/>
+        <FIELD NAME="message" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="Details or error message."/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="id_primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="timecreated_idx" UNIQUE="false" FIELDS="timecreated"/>
+      </INDEXES>
     </TABLE>
   </TABLES>
 </XMLDB>

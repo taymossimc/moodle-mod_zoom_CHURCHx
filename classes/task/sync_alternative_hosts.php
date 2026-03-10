@@ -116,13 +116,8 @@ class sync_alternative_hosts extends scheduled_task {
 
                 mtrace("  => Updating alternative hosts: {$newhosts}");
 
-                // Update on Zoom.
-                $updatedata = new \stdClass();
-                $updatedata->meeting_id = $zoom->meeting_id;
-                $updatedata->webinar = $zoom->webinar ?? false;
-                $updatedata->alternative_hosts = $newhosts;
-
-                $service->update_meeting($updatedata);
+                // Update only alternative hosts on Zoom (targeted PATCH).
+                $service->update_meeting_hosts($zoom->meeting_id, $zoom->webinar ?? false, $newhosts);
 
                 // Update in database.
                 $DB->set_field('zoomyt', 'alternative_hosts', $newhosts, ['id' => $zoom->id]);

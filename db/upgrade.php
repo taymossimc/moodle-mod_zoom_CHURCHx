@@ -1550,5 +1550,46 @@ function xmldb_zoomyt_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026021102, 'zoomyt');
     }
 
+    if ($oldversion < 2026021400) {
+        // Add transcript retry tracking fields to zoomyt_videos table.
+        $table = new xmldb_table('zoomyt_videos');
+
+        $field = new xmldb_field('transcript_retry_count', XMLDB_TYPE_INTEGER, '3', null, XMLDB_NOTNULL, null, '0');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $field = new xmldb_field('transcript_last_attempt', XMLDB_TYPE_INTEGER, '12', null, XMLDB_NOTNULL, null, '0');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Zoom savepoint reached.
+        upgrade_mod_savepoint(true, 2026021400, 'zoomyt');
+    }
+
+    if ($oldversion < 2026030902) {
+        // Add provision log table for diagnosing teacher alt-host provisioning.
+        $table = new xmldb_table('zoomyt_provision_log');
+        if (!$dbman->table_exists($table)) {
+            $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+            $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '12', null, XMLDB_NOTNULL, null, null);
+            $table->add_field('userid', XMLDB_TYPE_INTEGER, '10', null, null, null, null);
+            $table->add_field('email', XMLDB_TYPE_CHAR, '255', null, null, null, null);
+            $table->add_field('courseid', XMLDB_TYPE_INTEGER, '10', null, null, null, null);
+            $table->add_field('meetingid', XMLDB_TYPE_INTEGER, '15', null, null, null, null);
+            $table->add_field('action', XMLDB_TYPE_CHAR, '100', null, XMLDB_NOTNULL, null, null);
+            $table->add_field('result', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, null);
+            $table->add_field('message', XMLDB_TYPE_TEXT, null, null, null, null, null);
+
+            $table->add_key('id_primary', XMLDB_KEY_PRIMARY, ['id']);
+            $table->add_index('timecreated_idx', XMLDB_INDEX_NOTUNIQUE, ['timecreated']);
+
+            $dbman->create_table($table);
+        }
+
+        upgrade_mod_savepoint(true, 2026030902, 'zoomyt');
+    }
+
     return true;
 }

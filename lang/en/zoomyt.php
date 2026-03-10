@@ -52,6 +52,10 @@ $string['autoaddinstructorsashosts'] = 'Auto-add course instructors as alternati
 $string['autoaddinstructorsashosts_desc'] = 'When enabled, all course instructors (users with capability to add Zoom activities) will be automatically added as alternative hosts when a Zoom meeting is created or updated. This ensures that any instructor in the course can start and host meetings, regardless of who originally created the activity.';
 $string['autocreatezoomusers'] = 'Auto-create Zoom accounts for instructors';
 $string['autocreatezoomusers_desc'] = 'When enabled, instructors who do not yet have a Zoom account will be automatically added to your Zoom account and assigned a Pro license (using the license recycling logic to free a license if needed). When disabled, only instructors who already have a Zoom account will be added as alternative hosts.';
+$string['fallback_host_email'] = 'Fallback host email';
+$string['fallback_host_email_desc'] = 'Email of a licensed Zoom user on your account to use as the meeting host when a teacher\'s email is unavailable (e.g., registered on another Zoom organization or still pending invitation). The teacher will still join with full host control via the start URL, and the fallback account\'s display name will be temporarily changed to match the teacher\'s name.';
+$string['fallback_host_not_configured'] = 'Your email is not available on this Zoom account and no fallback host has been configured. Please contact your administrator.';
+$string['fallback_host_not_found'] = 'The configured fallback host email ({$a}) was not found on the Zoom account. Please contact your administrator.';
 $string['apiendpoint'] = 'Zoom API Endpoint';
 $string['apiendpoint_desc'] = 'Choose which Zoom API endpoint the Zoom activity will use to connect. The global API endpoint should work for all users. The European Union (EU) API endpoint is only intended for users who have a Zoom license with the EU provisioning option. If you are unsure, use the global API endpoint.';
 $string['apiendpoint_eu'] = 'EU API Endpoint';
@@ -616,6 +620,7 @@ $string['download_failed'] = 'Download failed: {$a}';
 // Scheduled tasks.
 $string['task_sync_recordings_youtube'] = 'Sync Zoom recordings to YouTube';
 $string['task_sync_alternative_hosts'] = 'Sync course instructors as alternative hosts';
+$string['task_retry_transcript_downloads'] = 'Retry downloading transcripts from YouTube';
 
 // Events.
 $string['event_video_uploaded'] = 'Video uploaded to YouTube';
@@ -729,3 +734,8 @@ $string['event_webhook_recording_ready'] = 'Webhook: Recording ready';
 $string['event_recording_discovered'] = 'Recording discovered';
 $string['event_meeting_created'] = 'Meeting created';
 $string['event_meeting_updated'] = 'Meeting updated';
+
+// Retry upload strings.
+$string['retry_upload'] = 'Retry Upload';
+$string['retry_upload_success'] = 'YouTube upload retry completed successfully.';
+$string['retry_upload_error'] = 'YouTube upload retry failed: {$a}';

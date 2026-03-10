@@ -122,7 +122,21 @@ function zoomyt_add_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = null)
         debugging("ZOOMYT: Auto-added instructors as alternative hosts: {$zoom->alternative_hosts}", DEBUG_DEVELOPER);
     }
 
-    $response = zoomyt_webservice()->create_meeting($zoom, $zoom->coursemodule);
+    try {
+        $response = zoomyt_create_meeting_with_alt_host_retry($zoom);
+    } catch (moodle_exception $e) {
+        // If meeting creation failed, try with the fallback host account.
+        $fallbackid = zoomyt_get_fallback_host_id();
+        if ($fallbackid && $zoom->host_id !== $fallbackid) {
+            zoomyt_provision_log('create_fallback_retry', 'ok',
+                'Meeting creation failed, retrying with fallback host: ' . $e->getMessage(),
+                null, null, $zoom->course);
+            $zoom->host_id = $fallbackid;
+            $response = zoomyt_create_meeting_with_alt_host_retry($zoom);
+        } else {
+            throw $e;
+        }
+    }
     $zoom = populate_zoomyt_from_response($zoom, $response);
     $zoom->timemodified = time();
     if (!empty($zoom->schedule_for)) {
@@ -254,9 +268,9 @@ function zoomyt_update_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = nu
         debugging("ZOOMYT: Auto-updated instructors as alternative hosts: {$zoom->alternative_hosts}", DEBUG_DEVELOPER);
     }
 
-    // Update meeting on Zoom.
+    // Update meeting on Zoom, retrying without problematic alt hosts if needed.
     try {
-        zoomyt_webservice()->update_meeting($zoom, $zoom->coursemodule);
+        zoomyt_update_meeting_with_alt_host_retry($zoom);
         if (!empty($zoom->schedule_for)) {
             // Only update this if we actually get a valid user.
             if ($correcthostzoomuser = zoomyt_get_user($zoom->schedule_for)) {

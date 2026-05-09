@@ -1645,5 +1645,10 @@ function xmldb_zoomyt_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026030910, 'zoomyt');
     }
 
+    if ($oldversion < 2026030911) {
+        // v2.7: version bump only (no schema changes).
+        upgrade_mod_savepoint(true, 2026030911, 'zoomyt');
+    }
+
     return true;
 }

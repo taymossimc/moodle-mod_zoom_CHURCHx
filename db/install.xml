@@ -56,6 +56,11 @@
         <FIELD NAME="yt_channel_name" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Activity-specific YouTube channel name for display"/>
         <FIELD NAME="yt_refresh_token" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="Activity-specific YouTube OAuth refresh token"/>
         <FIELD NAME="yt_default_visibility" TYPE="char" LENGTH="20" NOTNULL="false" DEFAULT="unlisted" SEQUENCE="false" COMMENT="Activity-specific YouTube visibility: public, unlisted, private"/>
+        <FIELD NAME="interpretation_enable" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Enable Zoom language interpretation for this meeting."/>
+        <FIELD NAME="interpretation_data" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="JSON array of interpreters: email, languages."/>
+        <FIELD NAME="sign_interpretation_enable" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Enable Zoom sign language interpretation."/>
+        <FIELD NAME="sign_interpretation_data" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="JSON array of sign interpreters: email, sign_language."/>
+        <FIELD NAME="breakoutrooms_enable" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Allow breakout rooms in meeting (with or without pre-assigned rooms)."/>
       </FIELDS>
       <KEYS>
         <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
@@ -330,6 +335,24 @@
       </KEYS>
       <INDEXES>
         <INDEX NAME="timecreated_idx" UNIQUE="false" FIELDS="timecreated"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="zoomyt_custom_occurrences" COMMENT="Scheduled session times for custom-dates recurring meetings (local only).">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="zoomid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Link to zoomyt activity."/>
+        <FIELD NAME="start_time" TYPE="int" LENGTH="12" NOTNULL="true" SEQUENCE="false" COMMENT="Session start (Unix timestamp)."/>
+        <FIELD NAME="duration" TYPE="int" LENGTH="6" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Duration in minutes."/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="12" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="12" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="zoomid_foreign" TYPE="foreign" FIELDS="zoomid" REFTABLE="zoomyt" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="zoomid_idx" UNIQUE="false" FIELDS="zoomid"/>
+        <INDEX NAME="zoomid_start_idx" UNIQUE="false" FIELDS="zoomid, start_time"/>
       </INDEXES>
     </TABLE>
   </TABLES>

@@ -95,7 +95,8 @@ define('ZOOM_RECURRINGTYPE_NOTIME', 0);
 define('ZOOM_RECURRINGTYPE_DAILY', 1);
 define('ZOOM_RECURRINGTYPE_WEEKLY', 2);
 define('ZOOM_RECURRINGTYPE_MONTHLY', 3);
-// Recurring monthly repeat options.
+/** Local-only: custom list of session dates; Zoom meeting is type 3 (recurring, no fixed time). */
+define('ZOOM_RECURRINGTYPE_CUSTOM', 4);
 define('ZOOM_MONTHLY_REPEAT_OPTION_DAY', 1);
 define('ZOOM_MONTHLY_REPEAT_OPTION_WEEK', 2);
 // Recurring end date options.
@@ -115,6 +116,128 @@ define('ZOOM_AUTORECORDING_CLOUD', 'cloud');
 define('ZOOM_REGISTRATION_AUTOMATIC', 0);
 define('ZOOM_REGISTRATION_MANUAL', 1);
 define('ZOOM_REGISTRATION_OFF', 2);
+
+/**
+ * Parse and save custom session occurrences for an activity (delete then insert).
+ *
+ * @param int $zoomid Activity id (zoomyt.id).
+ * @param array $occurrences List of ['start_time' => int unix, 'duration' => int minutes].
+ */
+function zoomyt_save_custom_occurrences(int $zoomid, array $occurrences): void {
+    global $DB;
+
+    $DB->delete_records('zoomyt_custom_occurrences', ['zoomid' => $zoomid]);
+    $now = time();
+    foreach ($occurrences as $occ) {
+        if (empty($occ['start_time'])) {
+            continue;
+        }
+        $rec = new stdClass();
+        $rec->zoomid = $zoomid;
+        $rec->start_time = (int) $occ['start_time'];
+        $rec->duration = max(1, (int) ($occ['duration'] ?? 60));
+        $rec->timecreated = $now;
+        $rec->timemodified = $now;
+        $DB->insert_record('zoomyt_custom_occurrences', $rec);
+    }
+}
+
+/**
+ * Return custom occurrences sorted by start_time.
+ *
+ * @param int $zoomid
+ * @return array of stdClass rows
+ */
+function zoomyt_get_custom_occurrences(int $zoomid): array {
+    global $DB;
+    return array_values($DB->get_records('zoomyt_custom_occurrences', ['zoomid' => $zoomid], 'start_time ASC'));
+}
+
+/**
+ * Decode custom_occurrences_json from the mod_form hidden field.
+ *
+ * @param string|null $json
+ * @return array List of [start_time, duration]
+ */
+function zoomyt_parse_custom_occurrences_json(?string $json): array {
+    $decoded = json_decode($json ?? '[]', true);
+    if (!is_array($decoded)) {
+        return [];
+    }
+    $out = [];
+    foreach ($decoded as $row) {
+        if (!is_array($row) || empty($row['start_time'])) {
+            continue;
+        }
+        $out[] = [
+            'start_time' => (int) $row['start_time'],
+            'duration' => (int) ($row['duration'] ?? 60),
+        ];
+    }
+    return $out;
+}
+
+/**
+ * Build interpretation interpreters array from textarea lines "email,lang1,lang2".
+ *
+ * @param string $text
+ * @return array For Zoom API language_interpretation.interpreters
+ */
+function zoomyt_parse_interpretation_lines(string $text): array {
+    $lines = preg_split('/\R/', $text);
+    $out = [];
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if ($line === '') {
+            continue;
+        }
+        $parts = array_map('trim', explode(',', $line));
+        $email = array_shift($parts);
+        if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            continue;
+        }
+        $langs = array_filter($parts);
+        if (empty($langs)) {
+            continue;
+        }
+        $out[] = [
+            'email' => $email,
+            'languages' => implode(',', $langs),
+        ];
+    }
+    return $out;
+}
+
+/**
+ * Build sign language interpreters from lines "email,American" etc.
+ *
+ * @param string $text
+ * @return array
+ */
+function zoomyt_parse_sign_interpretation_lines(string $text): array {
+    $lines = preg_split('/\R/', $text);
+    $out = [];
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if ($line === '') {
+            continue;
+        }
+        $pos = strpos($line, ',');
+        if ($pos === false) {
+            continue;
+        }
+        $email = trim(substr($line, 0, $pos));
+        $signlang = trim(substr($line, $pos + 1));
+        if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL) || $signlang === '') {
+            continue;
+        }
+        $out[] = [
+            'email' => $email,
+            'sign_language' => $signlang,
+        ];
+    }
+    return $out;
+}
 
 /**
  * Write a row to the zoomyt_provision_log table for diagnosing teacher provisioning.
@@ -365,6 +488,19 @@ function zoomyt_get_next_occurrence($zoom) {
             // Use 0 as there isn't anything better to return.
             $cachednextoccurrence = 0;
 
+        } else if ($zoom->recurrence_type == ZOOM_RECURRINGTYPE_CUSTOM) {
+            // Next session from locally stored occurrences.
+            $now = time();
+            $rows = zoomyt_get_custom_occurrences($zoom->id);
+            $cachednextoccurrence = 0;
+            foreach ($rows as $row) {
+                $end = $row->start_time + ($row->duration * 60);
+                if ($end >= $now) {
+                    $cachednextoccurrence = (int) $row->start_time;
+                    break;
+                }
+            }
+
             // Otherwise we have a recurring meeting with a recurrence schedule.
         } else {
             // Get the calendar event of the next occurrence.
@@ -436,13 +572,17 @@ function zoomyt_get_state($zoom, $ishost = false, $isteacher = false) {
     // Get the current time as calculation basis.
     $now = time();
 
-    // If this is a recurring meeting with a recurrence schedule.
+    // If this is a recurring meeting with a recurrence schedule (including custom local dates).
     if ($zoom->recurring && $zoom->recurrence_type != ZOOM_RECURRINGTYPE_NOTIME) {
         // Get the next occurrence start time.
         $starttime = zoomyt_get_next_occurrence($zoom);
     } else {
         // Get the meeting start time.
         $starttime = $zoom->start_time;
+    }
+
+    if ($zoom->recurring && (int) $zoom->recurrence_type === ZOOM_RECURRINGTYPE_CUSTOM && $starttime <= 0) {
+        return [false, false, true];
     }
 
     // Check if "join before host" / "join anytime" is enabled.

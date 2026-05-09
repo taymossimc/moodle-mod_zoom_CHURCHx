@@ -1591,5 +1591,59 @@ function xmldb_zoomyt_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026030902, 'zoomyt');
     }
 
+    if ($oldversion < 2026030909) {
+        $table = new xmldb_table('zoomyt');
+
+        $field = new xmldb_field('interpretation_enable', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'yt_default_visibility');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $field = new xmldb_field('interpretation_data', XMLDB_TYPE_TEXT, null, null, null, null, null, 'interpretation_enable');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $field = new xmldb_field('sign_interpretation_enable', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'interpretation_data');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $field = new xmldb_field('sign_interpretation_data', XMLDB_TYPE_TEXT, null, null, null, null, null, 'sign_interpretation_enable');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $field = new xmldb_field('breakoutrooms_enable', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'sign_interpretation_data');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $table = new xmldb_table('zoomyt_custom_occurrences');
+        if (!$dbman->table_exists($table)) {
+            $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+            $table->add_field('zoomid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+            $table->add_field('start_time', XMLDB_TYPE_INTEGER, '12', null, XMLDB_NOTNULL, null, null);
+            $table->add_field('duration', XMLDB_TYPE_INTEGER, '6', null, XMLDB_NOTNULL, null, '0');
+            $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '12', null, XMLDB_NOTNULL, null, '0');
+            $table->add_field('timemodified', XMLDB_TYPE_INTEGER, '12', null, XMLDB_NOTNULL, null, '0');
+
+            $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+            $table->add_key('zoomid_foreign', XMLDB_KEY_FOREIGN, ['zoomid'], 'zoomyt', ['id']);
+
+            $table->add_index('zoomid_idx', XMLDB_INDEX_NOTUNIQUE, ['zoomid']);
+            $table->add_index('zoomid_start_idx', XMLDB_INDEX_NOTUNIQUE, ['zoomid', 'start_time']);
+
+            $dbman->create_table($table);
+        }
+
+        upgrade_mod_savepoint(true, 2026030909, 'zoomyt');
+    }
+
+    if ($oldversion < 2026030910) {
+        // v2.6.16: schema changes shipped in 2026030909; bump for installs that skipped intermediate versions.
+        upgrade_mod_savepoint(true, 2026030910, 'zoomyt');
+    }
+
     return true;
 }

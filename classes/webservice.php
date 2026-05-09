@@ -793,7 +793,8 @@ class webservice {
 
         if (!empty($zoom->webinar)) {
             if ($zoom->recurring) {
-                if ($zoom->recurrence_type == ZOOM_RECURRINGTYPE_NOTIME) {
+                if ($zoom->recurrence_type == ZOOM_RECURRINGTYPE_NOTIME ||
+                        $zoom->recurrence_type == ZOOM_RECURRINGTYPE_CUSTOM) {
                     $data['type'] = ZOOM_RECURRING_WEBINAR;
                 } else {
                     $data['type'] = ZOOM_RECURRING_FIXED_WEBINAR;
@@ -803,7 +804,8 @@ class webservice {
             }
         } else {
             if ($zoom->recurring) {
-                if ($zoom->recurrence_type == ZOOM_RECURRINGTYPE_NOTIME) {
+                if ($zoom->recurrence_type == ZOOM_RECURRINGTYPE_NOTIME ||
+                        $zoom->recurrence_type == ZOOM_RECURRINGTYPE_CUSTOM) {
                     $data['type'] = ZOOM_RECURRING_MEETING;
                 } else {
                     $data['type'] = ZOOM_RECURRING_FIXED_MEETING;
@@ -865,7 +867,8 @@ class webservice {
         }
 
         // Add recurrence object.
-        if ($zoom->recurring && $zoom->recurrence_type != ZOOM_RECURRINGTYPE_NOTIME) {
+        if ($zoom->recurring && $zoom->recurrence_type != ZOOM_RECURRINGTYPE_NOTIME &&
+                $zoom->recurrence_type != ZOOM_RECURRINGTYPE_CUSTOM) {
             $data['recurrence']['type'] = (int) $zoom->recurrence_type;
             $data['recurrence']['repeat_interval'] = (int) $zoom->repeat_interval;
             if ($zoom->recurrence_type == ZOOM_RECURRINGTYPE_WEEKLY) {
@@ -913,9 +916,32 @@ class webservice {
 
         $data['tracking_fields'] = $tfarray;
 
-        if (isset($zoom->breakoutrooms)) {
-            $breakoutroom = ['enable' => true, 'rooms' => $zoom->breakoutrooms];
+        if (!empty($zoom->breakoutrooms_enable) || !empty($zoom->breakoutrooms)) {
+            $breakoutroom = ['enable' => true];
+            if (!empty($zoom->breakoutrooms)) {
+                $breakoutroom['rooms'] = $zoom->breakoutrooms;
+            }
             $data['settings']['breakout_room'] = $breakoutroom;
+        }
+
+        if (!empty($zoom->interpretation_enable) && !empty($zoom->interpretation_data)) {
+            $interpreters = json_decode($zoom->interpretation_data, true);
+            if (is_array($interpreters) && count($interpreters) > 0) {
+                $data['settings']['language_interpretation'] = [
+                    'enable' => true,
+                    'interpreters' => $interpreters,
+                ];
+            }
+        }
+
+        if (!empty($zoom->sign_interpretation_enable) && !empty($zoom->sign_interpretation_data)) {
+            $signinterpreters = json_decode($zoom->sign_interpretation_data, true);
+            if (is_array($signinterpreters) && count($signinterpreters) > 0) {
+                $data['settings']['sign_language_interpretation'] = [
+                    'enable' => true,
+                    'interpreters' => $signinterpreters,
+                ];
+            }
         }
 
         return $data;

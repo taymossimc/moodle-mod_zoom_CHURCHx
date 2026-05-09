@@ -92,6 +92,22 @@ function zoomyt_add_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = null)
         $zoom->weekly_days = zoomyt_handle_weekly_days($zoom);
     }
 
+    // Custom dates: set activity start/duration from first session for Zoom display/state.
+    $customoccurrences = [];
+    if ($zoom->recurring && $zoom->recurrence_type == ZOOM_RECURRINGTYPE_CUSTOM) {
+        $customoccurrences = zoomyt_parse_custom_occurrences_json($zoom->custom_occurrences_json ?? '');
+        if (!empty($customoccurrences)) {
+            usort($customoccurrences, function($a, $b) {
+                return $a['start_time'] <=> $b['start_time'];
+            });
+            $first = $customoccurrences[0];
+            $zoom->start_time = $first['start_time'];
+            $zoom->duration = $first['duration'] * 60;
+        }
+    }
+
+    unset($zoom->custom_occurrences_json);
+
     $zoom->course = (int) $zoom->course;
 
     $zoom->breakoutrooms = [];
@@ -148,7 +164,8 @@ function zoomyt_add_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = null)
         $zoom->host_id = $correcthostzoomuser->id;
     }
 
-    if (isset($zoom->recurring) && isset($response->occurrences) && empty($response->occurrences)) {
+    if (isset($zoom->recurring) && isset($response->occurrences) && empty($response->occurrences) &&
+            ($zoom->recurrence_type ?? null) != ZOOM_RECURRINGTYPE_CUSTOM) {
         // Recurring meetings did not create any occurrencces.
         // This means invalid options selected.
         // Need to rollback created meeting.
@@ -159,6 +176,9 @@ function zoomyt_add_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = null)
     }
 
     $zoom->id = $DB->insert_record('zoomyt', $zoom);
+    if ($zoom->recurring && ($zoom->recurrence_type ?? null) == ZOOM_RECURRINGTYPE_CUSTOM && !empty($customoccurrences)) {
+        zoomyt_save_custom_occurrences($zoom->id, $customoccurrences);
+    }
     if (!empty($zoom->breakoutrooms)) {
         // We ignore the API response and save the local data for breakout rooms to support dynamic users and groups.
         zoomyt_insert_instance_breakout_rooms($zoom->id, $breakoutrooms['db']);
@@ -222,6 +242,20 @@ function zoomyt_update_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = nu
     if ($zoom->recurring && $zoom->recurrence_type == ZOOM_RECURRINGTYPE_WEEKLY) {
         $zoom->weekly_days = zoomyt_handle_weekly_days($zoom);
     }
+
+    $customoccurrences = [];
+    if ($zoom->recurring && $zoom->recurrence_type == ZOOM_RECURRINGTYPE_CUSTOM) {
+        $customoccurrences = zoomyt_parse_custom_occurrences_json($zoom->custom_occurrences_json ?? '');
+        if (!empty($customoccurrences)) {
+            usort($customoccurrences, function($a, $b) {
+                return $a['start_time'] <=> $b['start_time'];
+            });
+            $first = $customoccurrences[0];
+            $zoom->start_time = $first['start_time'];
+            $zoom->duration = $first['duration'] * 60;
+        }
+    }
+    unset($zoom->custom_occurrences_json);
 
     $DB->update_record('zoomyt', $zoom);
 
@@ -295,6 +329,9 @@ function zoomyt_update_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = nu
     zoomyt_sync_meeting_tracking_fields($zoom->id, $response->tracking_fields ?? []);
 
     zoomyt_calendar_item_update($zoom);
+    if ($zoom->recurring && ($zoom->recurrence_type ?? null) == ZOOM_RECURRINGTYPE_CUSTOM) {
+        zoomyt_save_custom_occurrences($zoom->id, $customoccurrences);
+    }
     zoomyt_grade_item_update($zoom);
 
     // Log the meeting update event.
@@ -393,7 +430,7 @@ function populate_zoomyt_from_response(stdClass $zoom, stdClass $response) {
     $newzoom->meeting_id = $response->id;
     // Need to get the meeting name from API call for comparison in the refresh_events function.
     $newzoom->apiresponsename = $response->topic;
-    if (isset($response->start_time)) {
+    if (isset($response->start_time) && $response->start_time !== '' && $response->start_time !== null) {
         $newzoom->start_time = strtotime($response->start_time);
     }
 
@@ -488,6 +525,9 @@ function zoomyt_delete_instance($id) {
     }
 
     $DB->delete_records('zoomyt_meeting_details', ['zoomid' => $zoom->id]);
+
+    // Delete custom session dates.
+    $DB->delete_records('zoomyt_custom_occurrences', ['zoomid' => $zoom->id]);
 
     // Delete tracking field data for deleted meetings.
     $DB->delete_records('zoomyt_tracking_fields', ['meeting_id' => $zoom->id]);
@@ -610,6 +650,17 @@ function zoomyt_calendar_item_update(stdClass $zoom) {
     $newevents = [];
     if (!$zoom->recurring) {
         $newevents[''] = zoomyt_populate_calender_item($zoom);
+    } else if (!empty($zoom->recurring) && !empty($zoom->recurrence_type) &&
+            (int) $zoom->recurrence_type === ZOOM_RECURRINGTYPE_CUSTOM) {
+        foreach (zoomyt_get_custom_occurrences($zoom->id) as $row) {
+            $occurrence = (object) [
+                'occurrence_id' => 'custom_' . $row->id,
+                'start_time' => (int) $row->start_time,
+                'duration' => (int) $row->duration * 60,
+                'status' => 'active',
+            ];
+            $newevents[$occurrence->occurrence_id] = zoomyt_populate_calender_item($zoom, $occurrence);
+        }
     } else if (!empty($zoom->occurrences)) {
         foreach ($zoom->occurrences as $occurrence) {
             $uuid = $occurrence->occurrence_id;

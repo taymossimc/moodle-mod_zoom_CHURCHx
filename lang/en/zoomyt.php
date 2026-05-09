@@ -739,3 +739,25 @@ $string['event_meeting_updated'] = 'Meeting updated';
 $string['retry_upload'] = 'Retry Upload';
 $string['retry_upload_success'] = 'YouTube upload retry completed successfully.';
 $string['retry_upload_error'] = 'YouTube upload retry failed: {$a}';
+
+// Custom recurrence & interpretation (v2.6.16).
+$string['recurrence_option_custom'] = 'Custom dates (session list)';
+$string['customdates_help'] = 'List each session below with date/time and duration (minutes). Zoom provides one meeting link for all sessions; Moodle stores the schedule and adds calendar entries.';
+$string['customdates_add'] = 'Add session';
+$string['customdates_remove'] = 'Remove';
+$string['customdates_sessions'] = 'Scheduled sessions';
+$string['err_customdates_required'] = 'Add at least one session for custom recurrence.';
+$string['err_customdates_past'] = 'When creating the activity, each session must start today or later.';
+$string['interpretation'] = 'Interpretation';
+$string['interpretation_enable'] = 'Enable spoken-language interpretation';
+$string['interpretation_enable_desc'] = 'Interpreters must be users on your Zoom account. Each line lists an email and comma-separated Zoom interpretation language codes.';
+$string['interpretation_spoken_lines'] = 'Spoken interpreters';
+$string['interpretation_spoken_lines_help'] = 'One interpreter per line: <code>email,lang1,lang2</code> using Zoom codes (e.g. <code>US</code> English, <code>ES</code> Spanish).';
+$string['sign_interpretation_enable'] = 'Enable sign language interpretation';
+$string['sign_interpretation_enable_desc'] = 'One interpreter per line: email and sign language (e.g. American, Chinese, French, German, Italian, Japanese, Korean, Portuguese, Russian, Spanish).';
+$string['interpretation_sign_lines'] = 'Sign language interpreters';
+$string['interpretation_sign_lines_help'] = 'One per line: <code>email,SignLanguage</code> (e.g. <code>interpreter@example.edu,American</code>).';
+$string['breakoutrooms_enable'] = 'Allow breakout rooms during the meeting';
+$string['breakoutrooms_enable_desc'] = 'The host can create breakout rooms in the meeting without defining rooms here. Co-hosts can assist if your Zoom account allows co-hosts to manage breakout rooms.';
+$string['interpretation_notice_spoken'] = 'Spoken-language interpretation is available in this meeting.';
+$string['interpretation_notice_sign'] = 'Sign language interpretation is available in this meeting.';

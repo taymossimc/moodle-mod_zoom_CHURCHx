@@ -60,6 +60,7 @@ class mod_zoomyt_mod_form extends moodleform_mod {
 
         $config = get_config('zoomyt');
         $PAGE->requires->js_call_amd("mod_zoomyt/form", 'init');
+        $PAGE->requires->js_call_amd("mod_zoomyt/customdates", 'init');
 
         $isnew = empty($this->_cm);
 
@@ -215,6 +216,7 @@ class mod_zoomyt_mod_form extends moodleform_mod {
             ZOOM_RECURRINGTYPE_DAILY => get_string('recurrence_option_daily', 'zoomyt'),
             ZOOM_RECURRINGTYPE_WEEKLY => get_string('recurrence_option_weekly', 'zoomyt'),
             ZOOM_RECURRINGTYPE_MONTHLY => get_string('recurrence_option_monthly', 'zoomyt'),
+            ZOOM_RECURRINGTYPE_CUSTOM => get_string('recurrence_option_custom', 'zoomyt'),
             ZOOM_RECURRINGTYPE_NOTIME => get_string('recurrence_option_no_time', 'zoomyt'),
         ];
         $mform->addElement('select', 'recurrence_type', get_string('recurrencetype', 'zoomyt'), $recurrencetype);
@@ -239,6 +241,7 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         $group[] = $mform->createElement('html', $htmlspantextstart . 'monthly">' . get_string('month', 'zoomyt') . $htmlspantextend);
         $mform->addGroup($group, 'repeat_group', get_string('repeatinterval', 'zoomyt'), null, false);
         $mform->hideif('repeat_group', 'recurrence_type', 'eq', ZOOM_RECURRINGTYPE_NOTIME);
+        $mform->hideif('repeat_group', 'recurrence_type', 'eq', ZOOM_RECURRINGTYPE_CUSTOM);
         $mform->hideif('repeat_group', 'recurring', 'notchecked');
 
         // Weekly options.
@@ -315,10 +318,29 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         $mform->addGroup($group, 'radioenddate', get_string('enddate', 'zoomyt'), null, false);
         $mform->hideif('radioenddate', 'recurring', 'notchecked');
         $mform->hideif('radioenddate', 'recurrence_type', 'eq', ZOOM_RECURRINGTYPE_NOTIME);
+        $mform->hideif('radioenddate', 'recurrence_type', 'eq', ZOOM_RECURRINGTYPE_CUSTOM);
         // Set default option for end date to be "By".
         $mform->setDefault('end_date_option', ZOOM_END_DATE_OPTION_BY);
         // Set default end_date_time to be 1 week in the future.
         $mform->setDefault('end_date_time', strtotime('+1 week'));
+
+        // Custom session dates (stored in Moodle; Zoom uses recurring meeting without fixed time).
+        $mform->addElement('static', 'customdates_help', '', get_string('customdates_help', 'mod_zoomyt'));
+        $mform->hideIf('customdates_help', 'recurrence_type', 'noteq', ZOOM_RECURRINGTYPE_CUSTOM);
+        $mform->hideIf('customdates_help', 'recurring', 'notchecked');
+
+        $customdatelabels = json_encode([
+            'add' => get_string('customdates_add', 'mod_zoomyt'),
+            'remove' => get_string('customdates_remove', 'mod_zoomyt'),
+            'when' => get_string('start_time', 'mod_zoomyt'),
+            'duration' => get_string('duration', 'mod_zoomyt'),
+        ]);
+        $mform->addElement(
+            'html',
+            '<div id="zoomyt-custom-dates-root" class="mb-3" data-labels="' . htmlspecialchars($customdatelabels, ENT_QUOTES, 'UTF-8') . '"></div>'
+        );
+        $mform->addElement('hidden', 'custom_occurrences_json', '');
+        $mform->setType('custom_occurrences_json', PARAM_RAW);
 
         // Supplementary feature: Webinars.
         // Only show if the admin did not disable this feature completely.
@@ -432,10 +454,19 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         $mform->setDefault('registration', $config->defaultregistration);
         $mform->addHelpButton('registration', 'registration', 'mod_zoomyt');
         $mform->hideIf('registration', 'recurrence_type', 'eq', ZOOM_RECURRINGTYPE_NOTIME);
+        $mform->hideIf('registration', 'recurrence_type', 'eq', ZOOM_RECURRINGTYPE_CUSTOM);
 
         // Adding the "breakout rooms" fieldset.
         $mform->addElement('header', 'breakoutrooms', get_string('breakoutrooms', 'mod_zoomyt'));
         $mform->setExpanded('breakoutrooms');
+
+        $mform->addElement(
+            'advcheckbox',
+            'breakoutrooms_enable',
+            get_string('breakoutrooms_enable', 'mod_zoomyt'),
+            get_string('breakoutrooms_enable_desc', 'mod_zoomyt')
+        );
+        $mform->addHelpButton('breakoutrooms_enable', 'breakoutrooms_enable', 'mod_zoomyt');
 
         $courseid = $this->current->course;
         $context = context_course::instance($courseid);
@@ -762,6 +793,41 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         $mform->setDefault('show_media', $config->defaultshowmedia);
         $mform->addHelpButton('show_media', 'showmedia', 'zoomyt');
 
+        // Language and sign interpretation (Zoom meeting settings).
+        $mform->addElement('header', 'interpretation', get_string('interpretation', 'mod_zoomyt'));
+        $mform->setExpanded('interpretation', false);
+        $mform->addElement(
+            'advcheckbox',
+            'interpretation_enable',
+            get_string('interpretation_enable', 'mod_zoomyt'),
+            get_string('interpretation_enable_desc', 'mod_zoomyt')
+        );
+        $mform->addHelpButton('interpretation_enable', 'interpretation_enable', 'mod_zoomyt');
+        $mform->addElement(
+            'textarea',
+            'interpretation_spoken_lines',
+            get_string('interpretation_spoken_lines', 'mod_zoomyt'),
+            ['rows' => 5, 'cols' => 70, 'wrap' => 'virtual']
+        );
+        $mform->setType('interpretation_spoken_lines', PARAM_RAW);
+        $mform->addHelpButton('interpretation_spoken_lines', 'interpretation_spoken_lines', 'mod_zoomyt');
+
+        $mform->addElement(
+            'advcheckbox',
+            'sign_interpretation_enable',
+            get_string('sign_interpretation_enable', 'mod_zoomyt'),
+            get_string('sign_interpretation_enable_desc', 'mod_zoomyt')
+        );
+        $mform->addHelpButton('sign_interpretation_enable', 'sign_interpretation_enable', 'mod_zoomyt');
+        $mform->addElement(
+            'textarea',
+            'interpretation_sign_lines',
+            get_string('interpretation_sign_lines', 'mod_zoomyt'),
+            ['rows' => 4, 'cols' => 70, 'wrap' => 'virtual']
+        );
+        $mform->setType('interpretation_sign_lines', PARAM_RAW);
+        $mform->addHelpButton('interpretation_sign_lines', 'interpretation_sign_lines', 'mod_zoomyt');
+
         // Check if there is any setting to be shown in the "host" fieldset.
         $showschedulingprivilege = ($config->showschedulingprivilege != ZOOM_SCHEDULINGPRIVILEGE_DISABLE) &&
                 count($scheduleusers) > 1 && $allowschedule; // Check if the size is greater than 1 because
@@ -1040,8 +1106,9 @@ class mod_zoomyt_mod_form extends moodleform_mod {
 
         // Add some postprocessing around the recurrence settings.
         if ($data->recurring) {
-            // If "No fixed time" meeting selected, dont need repeat_interval and other options.
-            if ($data->recurrence_type == ZOOM_RECURRINGTYPE_NOTIME) {
+            // If "No fixed time" or custom dates meeting selected, dont need repeat_interval and other options.
+            if ($data->recurrence_type == ZOOM_RECURRINGTYPE_NOTIME ||
+                    $data->recurrence_type == ZOOM_RECURRINGTYPE_CUSTOM) {
                 unset($data->repeat_interval);
                 // Unset end_times and end_date.
                 unset($data->end_date_option);
@@ -1062,11 +1129,34 @@ class mod_zoomyt_mod_form extends moodleform_mod {
             }
         }
 
-        // Make sure registration is not enabled for No Fixed Time recurring meetings.
-        if ($data->recurring && $data->recurrence_type == ZOOM_RECURRINGTYPE_NOTIME) {
+        // Make sure registration is not enabled for No Fixed Time or custom-dates recurring meetings.
+        if ($data->recurring && ($data->recurrence_type == ZOOM_RECURRINGTYPE_NOTIME ||
+                $data->recurrence_type == ZOOM_RECURRINGTYPE_CUSTOM)) {
             if (isset($data->registration) && $data->registration == ZOOM_REGISTRATION_AUTOMATIC) {
                 $data->registration = ZOOM_REGISTRATION_OFF;
             }
+        }
+
+        // Spoken / sign interpretation: serialize to JSON for the database.
+        if (!empty($data->interpretation_enable)) {
+            $spoken = zoomyt_parse_interpretation_lines($data->interpretation_spoken_lines ?? '');
+            $data->interpretation_data = json_encode($spoken);
+        } else {
+            $data->interpretation_data = null;
+        }
+        unset($data->interpretation_spoken_lines);
+
+        if (!empty($data->sign_interpretation_enable)) {
+            $sign = zoomyt_parse_sign_interpretation_lines($data->interpretation_sign_lines ?? '');
+            $data->sign_interpretation_data = json_encode($sign);
+        } else {
+            $data->sign_interpretation_data = null;
+        }
+        unset($data->interpretation_sign_lines);
+
+        // Pre-assigned breakout rooms imply breakout rooms enabled.
+        if (!empty($data->rooms)) {
+            $data->breakoutrooms_enable = 1;
         }
     }
 
@@ -1082,6 +1172,46 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         global $DB;
 
         parent::data_preprocessing($defaultvalues);
+
+        // Custom session dates for editing.
+        if (!empty($defaultvalues['id']) && !empty($defaultvalues['recurrence_type']) &&
+                (int) $defaultvalues['recurrence_type'] === ZOOM_RECURRINGTYPE_CUSTOM) {
+            $rows = zoomyt_get_custom_occurrences((int) $defaultvalues['id']);
+            $json = [];
+            foreach ($rows as $r) {
+                $json[] = [
+                    'start_time' => (int) $r->start_time,
+                    'duration' => (int) $r->duration,
+                ];
+            }
+            $defaultvalues['custom_occurrences_json'] = json_encode($json);
+        }
+
+        // Interpretation lines from stored JSON.
+        if (!empty($defaultvalues['interpretation_data'])) {
+            $arr = json_decode($defaultvalues['interpretation_data'], true);
+            $lines = [];
+            if (is_array($arr)) {
+                foreach ($arr as $row) {
+                    if (!empty($row['email']) && isset($row['languages'])) {
+                        $lines[] = $row['email'] . ',' . $row['languages'];
+                    }
+                }
+            }
+            $defaultvalues['interpretation_spoken_lines'] = implode("\n", $lines);
+        }
+        if (!empty($defaultvalues['sign_interpretation_data'])) {
+            $arr = json_decode($defaultvalues['sign_interpretation_data'], true);
+            $lines = [];
+            if (is_array($arr)) {
+                foreach ($arr as $row) {
+                    if (!empty($row['email']) && !empty($row['sign_language'])) {
+                        $lines[] = $row['email'] . ',' . $row['sign_language'];
+                    }
+                }
+            }
+            $defaultvalues['interpretation_sign_lines'] = implode("\n", $lines);
+        }
 
         // Get config.
         $config = get_config('zoomyt');
@@ -1149,7 +1279,8 @@ class mod_zoomyt_mod_form extends moodleform_mod {
             } else if ($data['duration'] > 150 * 60 * 60) {
                 $errors['duration'] = get_string('err_duration_too_long', 'zoomyt');
             }
-        } else if ($data['recurring'] == 1 && $data['recurrence_type'] != ZOOM_RECURRINGTYPE_NOTIME) {
+        } else if ($data['recurring'] == 1 && $data['recurrence_type'] != ZOOM_RECURRINGTYPE_NOTIME &&
+                $data['recurrence_type'] != ZOOM_RECURRINGTYPE_CUSTOM) {
             // Make sure start date time (first potential date of next meeting) is in the future.
             if ($data['start_time'] < time() && $data['meeting_id'] < 0) {
                 $errors['start_time'] = get_string('err_start_time_past_recurring', 'zoomyt');
@@ -1160,6 +1291,26 @@ class mod_zoomyt_mod_form extends moodleform_mod {
                 $errors['duration'] = get_string('err_duration_nonpositive', 'zoomyt');
             } else if ($data['duration'] > 150 * 60 * 60) {
                 $errors['duration'] = get_string('err_duration_too_long', 'zoomyt');
+            }
+        } else if ($data['recurring'] == 1 && $data['recurrence_type'] == ZOOM_RECURRINGTYPE_CUSTOM) {
+            $occurrences = zoomyt_parse_custom_occurrences_json($data['custom_occurrences_json'] ?? '');
+            if (empty($occurrences)) {
+                $errors['customdates_help'] = get_string('err_customdates_required', 'mod_zoomyt');
+            }
+            $now = time();
+            foreach ($occurrences as $occ) {
+                if ($occ['duration'] <= 0) {
+                    $errors['customdates_help'] = get_string('err_duration_nonpositive', 'zoomyt');
+                    break;
+                }
+                if ($occ['duration'] > 150 * 60) {
+                    $errors['customdates_help'] = get_string('err_duration_too_long', 'zoomyt');
+                    break;
+                }
+                if ($occ['start_time'] < $now && $data['meeting_id'] < 0) {
+                    $errors['customdates_help'] = get_string('err_customdates_past', 'mod_zoomyt');
+                    break;
+                }
             }
         }
 
@@ -1253,7 +1404,9 @@ class mod_zoomyt_mod_form extends moodleform_mod {
                 }
             }
 
-            if ($data['recurrence_type'] != ZOOM_RECURRINGTYPE_NOTIME && $data['end_date_option'] == ZOOM_END_DATE_OPTION_BY) {
+            if ($data['recurrence_type'] != ZOOM_RECURRINGTYPE_NOTIME &&
+                    $data['recurrence_type'] != ZOOM_RECURRINGTYPE_CUSTOM &&
+                    $data['end_date_option'] == ZOOM_END_DATE_OPTION_BY) {
                 if ($data['end_date_time'] < time()) {
                     $errors['radioenddate'] = get_string('err_end_date', 'zoomyt');
                 }

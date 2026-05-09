@@ -52,7 +52,8 @@ define(['jquery', 'core/form-autocomplete', 'core/str', 'core/notification'], fu
         REPEAT_OPTION_NONE: 0,
         REPEAT_OPTION_DAILY: 1,
         REPEAT_OPTION_WEEKLY: 2,
-        REPEAT_OPTION_MONTHLY: 3
+        REPEAT_OPTION_MONTHLY: 3,
+        REPEAT_OPTION_CUSTOM: 4
     };
 
     /**
@@ -109,7 +110,8 @@ define(['jquery', 'core/form-autocomplete', 'core/str', 'core/notification'], fu
         // Disable start time and duration if "No Fixed Time" recurring meeting/webinar selected.
         var disabled = false;
         var repeatVal = parseInt($(SELECTORS.REPEAT_SELECT).val(), 10);
-        if ($(SELECTORS.RECURRING).prop('checked') && repeatVal === REPEAT_OPTIONS.REPEAT_OPTION_NONE) {
+        if ($(SELECTORS.RECURRING).prop('checked') && (repeatVal === REPEAT_OPTIONS.REPEAT_OPTION_NONE ||
+                repeatVal === REPEAT_OPTIONS.REPEAT_OPTION_CUSTOM)) {
             disabled = true;
         }
         $(SELECTORS.START_TIME).prop('disabled', disabled);
@@ -129,6 +131,8 @@ define(['jquery', 'core/form-autocomplete', 'core/str', 'core/notification'], fu
             $(SELECTORS.REPEAT_INTERVAL_WEEKLY).show();
         } else if (repeatSelectVal === REPEAT_OPTIONS.REPEAT_OPTION_MONTHLY) {
             $(SELECTORS.REPEAT_INTERVAL_MONTHLY).show();
+        } else if (repeatSelectVal === REPEAT_OPTIONS.REPEAT_OPTION_CUSTOM) {
+            // No repeat interval label for custom dates.
         }
     };
 

@@ -340,6 +340,42 @@ if ($showschedule) {
         $table->data[] = $rowduration;
     }
 
+    // Custom session schedule (stored in Moodle).
+    if ($zoom->recurring && (int) $zoom->recurrence_type === ZOOM_RECURRINGTYPE_CUSTOM) {
+        $sessions = zoomyt_get_custom_occurrences($zoom->id);
+        if (!empty($sessions)) {
+            $list = html_writer::start_tag('ul', ['class' => 'mb-0']);
+            foreach ($sessions as $s) {
+                $line = userdate($s->start_time) . ' — ' . format_time($s->duration * 60);
+                $list .= html_writer::tag('li', $line);
+            }
+            $list .= html_writer::end_tag('ul');
+            $rowcust = new html_table_row();
+            $rowcust->id = 'zoom_schedule-customdates';
+            $h = new html_table_cell(get_string('customdates_sessions', 'mod_zoomyt'));
+            $h->header = true;
+            $rowcust->cells = [$h, new html_table_cell($list)];
+            $table->data[] = $rowcust;
+        }
+    }
+
+    // Interpretation notice.
+    if (!empty($zoom->interpretation_enable) || !empty($zoom->sign_interpretation_enable)) {
+        $interp = [];
+        if (!empty($zoom->interpretation_enable)) {
+            $interp[] = get_string('interpretation_notice_spoken', 'mod_zoomyt');
+        }
+        if (!empty($zoom->sign_interpretation_enable)) {
+            $interp[] = get_string('interpretation_notice_sign', 'mod_zoomyt');
+        }
+        $rowinterp = new html_table_row();
+        $rowinterp->id = 'zoom_schedule-interpretation';
+        $ih = new html_table_cell(get_string('interpretation', 'mod_zoomyt'));
+        $ih->header = true;
+        $rowinterp->cells = [$ih, new html_table_cell(implode(html_writer::empty_tag('br'), $interp))];
+        $table->data[] = $rowinterp;
+    }
+
     // Show recordings section if option enabled to view recordings.
     if (!empty($config->viewrecordings)) {
         $recordinghtml = null;

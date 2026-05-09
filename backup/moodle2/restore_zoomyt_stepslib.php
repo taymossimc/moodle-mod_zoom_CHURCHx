@@ -45,6 +45,7 @@ class restore_activity_structure_step extends \restore_activity_structure_step {
         $paths = [];
         $paths[] = new restore_path_element('zoomyt', '/activity/zoomyt');
         $paths[] = new restore_path_element('zoomyt_tracking_field', '/activity/zoomyt/trackingfields/trackingfield');
+        $paths[] = new restore_path_element('zoomyt_custom_occurrence', '/activity/zoomyt/customoccurrences/customoccurrence');
 
         // Return the paths wrapped into standard activity structure.
         return $this->prepare_activity_structure($paths);
@@ -94,6 +95,25 @@ class restore_activity_structure_step extends \restore_activity_structure_step {
         // Create the calendar events for the new meeting.
         $data->id = $newitemid;
         zoomyt_calendar_item_update($data);
+    }
+
+    /**
+     * Restore custom session occurrences.
+     *
+     * @param array $data
+     */
+    protected function process_zoomyt_custom_occurrence($data) {
+        global $DB;
+
+        $data = (object) $data;
+        $data->zoomid = $this->get_new_parentid('zoomyt');
+        unset($data->id);
+        $DB->insert_record('zoomyt_custom_occurrences', $data);
+
+        $zoom = $DB->get_record('zoomyt', ['id' => $data->zoomid], '*', IGNORE_MISSING);
+        if ($zoom && !empty($zoom->recurring) && (int) $zoom->recurrence_type === ZOOM_RECURRINGTYPE_CUSTOM) {
+            zoomyt_calendar_item_update($zoom);
+        }
     }
 
     /**

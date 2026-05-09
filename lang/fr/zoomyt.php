@@ -684,3 +684,25 @@ $string['event_meeting_updated'] = 'Réunion mise à jour';
 $string['retry_upload'] = 'Réessayer le Téléversement';
 $string['retry_upload_success'] = 'Réessai du téléversement YouTube terminé avec succès.';
 $string['retry_upload_error'] = 'Réessai du téléversement YouTube échoué: {$a}';
+
+// Récurrence personnalisée et interprétation (v2.6.16).
+$string['recurrence_option_custom'] = 'Dates personnalisées (liste de sessions)';
+$string['customdates_help'] = 'Ajoutez chaque session avec date/heure et durée (minutes). Zoom fournit un lien unique ; Moodle conserve le calendrier local.';
+$string['customdates_add'] = 'Ajouter une session';
+$string['customdates_remove'] = 'Supprimer';
+$string['customdates_sessions'] = 'Sessions planifiées';
+$string['err_customdates_required'] = 'Ajoutez au moins une session pour la récurrence personnalisée.';
+$string['err_customdates_past'] = 'Lors de la création, chaque session doit commencer aujourd\'hui ou plus tard.';
+$string['interpretation'] = 'Interprétation';
+$string['interpretation_enable'] = 'Activer l\'interprétation orale';
+$string['interpretation_enable_desc'] = 'Les interprètes doivent être des utilisateurs de votre compte Zoom. Chaque ligne : e-mail et codes de langue séparés par des virgules.';
+$string['interpretation_spoken_lines'] = 'Interprètes oraux';
+$string['interpretation_spoken_lines_help'] = 'Une ligne par interprète : <code>email,langue1,langue2</code> avec les codes Zoom (ex. <code>US</code>, <code>ES</code>).';
+$string['sign_interpretation_enable'] = 'Activer l\'interprétation en langue des signes';
+$string['sign_interpretation_enable_desc'] = 'Une ligne par interprète : e-mail et langue des signes (American, Chinese, French, etc.).';
+$string['interpretation_sign_lines'] = 'Interprètes en langue des signes';
+$string['interpretation_sign_lines_help'] = 'Une par ligne : <code>email,LangueSignes</code> (ex. <code>interprete@exemple.edu,American</code>).';
+$string['breakoutrooms_enable'] = 'Autoriser les salles de sous-groupes pendant la réunion';
+$string['breakoutrooms_enable_desc'] = 'L\'hôte peut créer des salles sans les prédéfinir ici. Les co-hôtes peuvent aider si le compte Zoom le permet.';
+$string['interpretation_notice_spoken'] = 'Une interprétation orale est disponible pour cette réunion.';
+$string['interpretation_notice_sign'] = 'Une interprétation en langue des signes est disponible pour cette réunion.';

@@ -684,3 +684,25 @@ $string['event_meeting_updated'] = 'Reunión actualizada';
 $string['retry_upload'] = 'Reintentar Subida';
 $string['retry_upload_success'] = 'Reintento de subida a YouTube completado exitosamente.';
 $string['retry_upload_error'] = 'Reintento de subida a YouTube falló: {$a}';
+
+// Recurrencia personalizada e interpretación (v2.6.16).
+$string['recurrence_option_custom'] = 'Fechas personalizadas (lista de sesiones)';
+$string['customdates_help'] = 'Añada cada sesión con fecha/hora y duración (minutos). Zoom proporciona un enlace único; Moodle guarda el calendario local.';
+$string['customdates_add'] = 'Añadir sesión';
+$string['customdates_remove'] = 'Eliminar';
+$string['customdates_sessions'] = 'Sesiones programadas';
+$string['err_customdates_required'] = 'Añada al menos una sesión para la recurrencia personalizada.';
+$string['err_customdates_past'] = 'Al crear la actividad, cada sesión debe comenzar hoy o más tarde.';
+$string['interpretation'] = 'Interpretación';
+$string['interpretation_enable'] = 'Activar interpretación hablada';
+$string['interpretation_enable_desc'] = 'Los intérpretes deben ser usuarios de su cuenta Zoom. Cada línea: correo y códigos de idioma separados por comas.';
+$string['interpretation_spoken_lines'] = 'Intérpretes hablados';
+$string['interpretation_spoken_lines_help'] = 'Una línea por intérprete: <code>correo,idioma1,idioma2</code> con códigos Zoom (p. ej. <code>US</code>, <code>ES</code>).';
+$string['sign_interpretation_enable'] = 'Activar interpretación de lengua de signos';
+$string['sign_interpretation_enable_desc'] = 'Una línea por intérprete: correo e idioma de signos (American, Chinese, French, etc.).';
+$string['interpretation_sign_lines'] = 'Intérpretes de lengua de signos';
+$string['interpretation_sign_lines_help'] = 'Una por línea: <code>correo,IdiomaSignos</code> (p. ej. <code>interprete@ejemplo.edu,American</code>).';
+$string['breakoutrooms_enable'] = 'Permitir salas de grupos durante la reunión';
+$string['breakoutrooms_enable_desc'] = 'El anfitrión puede crear salas de grupos sin definirlas aquí. Los coanfitriones pueden ayudar si Zoom lo permite en la cuenta.';
+$string['interpretation_notice_spoken'] = 'Hay interpretación hablada disponible en esta reunión.';
+$string['interpretation_notice_sign'] = 'Hay interpretación en lengua de signos disponible en esta reunión.';

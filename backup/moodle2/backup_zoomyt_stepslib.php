@@ -49,19 +49,32 @@ class backup_activity_structure_step extends \backup_activity_structure_step {
             'recordings_visible_default', 'show_schedule', 'show_security', 'show_media', 'option_auto_recording',
             'registration', 'show_join_button', 'completionattendance',
             'yt_use_category', 'yt_channel_id', 'yt_channel_name', 'yt_refresh_token', 'yt_default_visibility',
+            'interpretation_enable', 'interpretation_data', 'sign_interpretation_enable', 'sign_interpretation_data',
+            'breakoutrooms_enable', 'completionwatchpercent',
         ]);
 
         $trackingfields = new backup_nested_element('trackingfields');
 
         $trackingfield = new backup_nested_element('trackingfield', ['id'], ['meeting_id', 'tracking_field', 'value']);
 
+        $customoccurrences = new backup_nested_element('customoccurrences');
+
+        $customoccurrence = new backup_nested_element('customoccurrence', ['id'],
+            ['zoomid', 'start_time', 'duration', 'timecreated', 'timemodified']);
+
         // If we had more elements, we would build the tree here.
         $zoom->add_child($trackingfields);
         $trackingfields->add_child($trackingfield);
+        $zoom->add_child($customoccurrences);
+        $customoccurrences->add_child($customoccurrence);
 
         // Define data sources.
         $zoom->set_source_table('zoomyt', ['id' => backup::VAR_ACTIVITYID]);
         $trackingfield->set_source_table('zoomyt_tracking_fields', ['meeting_id' => backup::VAR_ACTIVITYID]);
+        $customoccurrence->set_source_sql(
+            'SELECT * FROM {zoomyt_custom_occurrences} WHERE zoomid = ?',
+            [backup::VAR_ACTIVITYID]
+        );
 
         // If we were referring to other tables, we would annotate the relation
         // with the element's annotate_ids() method.

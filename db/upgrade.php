@@ -1708,5 +1708,11 @@ function xmldb_zoomyt_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026051205, 'zoomyt');
     }
 
+    if ($oldversion < 2026051206) {
+        // v2.7.8: added lang/pt_br alongside lang/pt so Brazilian Portuguese sites
+        // get the localized strings (Moodle's pt_br does not fall back to pt).
+        upgrade_mod_savepoint(true, 2026051206, 'zoomyt');
+    }
+
     return true;
 }

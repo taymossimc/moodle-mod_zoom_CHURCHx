@@ -1441,38 +1441,45 @@ function zoomyt_load_meeting($id, $context, $usestarturl = true) {
         return $returns;
     }
 
+    // Determine the in-meeting display name for the current Moodle user.
+    // The name is appended to both join_url AND start_url so the teacher shows
+    // their own name in the Zoom room, regardless of which Zoom account owns
+    // the meeting (in particular the shared "fallback host" account).
+    $unamesetting = get_config('zoomyt', 'unamedisplay');
+    switch ($unamesetting) {
+        case 'fullname':
+        default:
+            $unamedisplay = fullname($USER);
+            break;
+
+        case 'firstname':
+            $unamedisplay = $USER->firstname;
+            break;
+
+        case 'idfullname':
+            $unamedisplay = '(' . $USER->id . ') ' . fullname($USER);
+            break;
+
+        case 'id':
+            $unamedisplay = '(' . $USER->id . ')';
+            break;
+    }
+
     // Check if we should use the start meeting url.
     // Teachers get the start_url (full host control) even if they're not the "real host"
     // (e.g., when a fallback host account was used to create the meeting).
     if (($userisrealhost || $isteacher) && $usestarturl) {
-        // If the meeting uses the fallback host, rename it to match the teacher.
+        // Keep the legacy host rename for Zoom-side reporting (the meeting's host name
+        // in Zoom reports comes from the underlying account). It is best-effort and the
+        // uname URL parameter below is what guarantees the correct in-meeting name even
+        // if the API rename fails or hasn't propagated yet.
         zoomyt_rename_host_for_teacher($zoom->host_id, $USER);
         $starturl = zoomyt_get_start_url($zoom->meeting_id, $zoom->webinar, $zoom->join_url);
-        $returns['nexturl'] = new moodle_url($starturl);
+        $returns['nexturl'] = new moodle_url($starturl, ['uname' => $unamedisplay, 'uemail' => $USER->email]);
     } else {
         $url = $zoom->join_url;
         if ($userisregistered) {
             $url = $registrantjoinurl;
-        }
-
-        $unamesetting = get_config('zoomyt', 'unamedisplay');
-        switch ($unamesetting) {
-            case 'fullname':
-            default:
-                $unamedisplay = fullname($USER);
-                break;
-
-            case 'firstname':
-                $unamedisplay = $USER->firstname;
-                break;
-
-            case 'idfullname':
-                $unamedisplay = '(' . $USER->id . ') ' . fullname($USER);
-                break;
-
-            case 'id':
-                $unamedisplay = '(' . $USER->id . ')';
-                break;
         }
 
         // Try to send the user email (not guaranteed).

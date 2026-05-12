@@ -1701,5 +1701,12 @@ function xmldb_zoomyt_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026051204, 'zoomyt');
     }
 
+    if ($oldversion < 2026051205) {
+        // v2.7.7: start_url now carries uname/uemail so teachers see their own
+        // display name in Zoom regardless of the fallback host account name; no
+        // schema changes required.
+        upgrade_mod_savepoint(true, 2026051205, 'zoomyt');
+    }
+
     return true;
 }

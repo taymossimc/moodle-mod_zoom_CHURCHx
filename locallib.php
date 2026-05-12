@@ -225,12 +225,10 @@ function zoomyt_get_sign_languages(): array {
 /**
  * Build the spoken-language interpreters array from the editor's row JSON.
  *
- * The form submits an array of `{email, language}` rows where `language` is the
- * 2-letter Zoom country code the interpreter translates to/from English. Zoom's
- * API expects `languages` as a comma-separated pair, so we pair every selected
- * language with English ("US").
+ * The form submits an array of `{email, lang_from, lang_to}` rows. Each row's
+ * Zoom API entry has `languages` as a comma-separated pair `"FROM,TO"`.
  *
- * @param array $rows Decoded JSON array of {email, language}.
+ * @param array $rows Decoded JSON array of {email, lang_from, lang_to}.
  * @return array Sanitized interpreters ready for `language_interpretation.interpreters`.
  */
 function zoomyt_build_spoken_payload_from_rows(array $rows): array {
@@ -239,14 +237,15 @@ function zoomyt_build_spoken_payload_from_rows(array $rows): array {
     $seen = [];
     foreach ($rows as $row) {
         $email = trim((string) ($row['email'] ?? ''));
-        $lang = trim((string) ($row['language'] ?? ''));
-        if ($email === '' || $lang === '' || $lang === 'US') {
+        $from = strtoupper(trim((string) ($row['lang_from'] ?? '')));
+        $to = strtoupper(trim((string) ($row['lang_to'] ?? '')));
+        if ($email === '' || $from === '' || $to === '' || $from === $to) {
             continue;
         }
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             continue;
         }
-        if (!isset($valid[$lang])) {
+        if (!isset($valid[$from]) || !isset($valid[$to])) {
             continue;
         }
         $key = strtolower($email);
@@ -256,7 +255,7 @@ function zoomyt_build_spoken_payload_from_rows(array $rows): array {
         $seen[$key] = true;
         $out[] = [
             'email' => $email,
-            'languages' => 'US,' . $lang,
+            'languages' => $from . ',' . $to,
         ];
     }
     return $out;
@@ -300,11 +299,11 @@ function zoomyt_build_sign_payload_from_rows(array $rows): array {
 /**
  * Convert stored spoken-interpretation JSON (Zoom payload) back into editor rows.
  *
- * The stored format has `languages` as "US,XX"; the editor only cares about the
- * non-English partner code.
+ * The stored format has `languages` as "FROM,TO"; the editor expects each row
+ * as {email, lang_from, lang_to}.
  *
  * @param string|null $jsondata Raw `interpretation_data` column value.
- * @return array<int,array{email:string,language:string}>
+ * @return array<int,array{email:string,lang_from:string,lang_to:string}>
  */
 function zoomyt_rows_from_spoken_data($jsondata): array {
     if (empty($jsondata)) {
@@ -320,18 +319,10 @@ function zoomyt_rows_from_spoken_data($jsondata): array {
         if ($email === '') {
             continue;
         }
-        $pair = array_map('trim', explode(',', (string) ($row['languages'] ?? '')));
-        $lang = '';
-        foreach ($pair as $code) {
-            if ($code !== '' && strtoupper($code) !== 'US') {
-                $lang = strtoupper($code);
-                break;
-            }
-        }
-        if ($lang === '' && !empty($pair)) {
-            $lang = strtoupper(end($pair));
-        }
-        $rows[] = ['email' => $email, 'language' => $lang];
+        $pair = array_map('strtoupper', array_map('trim', explode(',', (string) ($row['languages'] ?? ''))));
+        $from = $pair[0] ?? '';
+        $to = $pair[1] ?? '';
+        $rows[] = ['email' => $email, 'lang_from' => $from, 'lang_to' => $to];
     }
     return $rows;
 }

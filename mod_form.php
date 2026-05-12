@@ -816,11 +816,11 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         $mform->addHelpButton('interpretation_enable', 'interpretation_enable', 'mod_zoomyt');
 
         $spokenlangs = zoomyt_get_interpretation_languages();
-        $spokenlangs_for_picker = $spokenlangs;
-        unset($spokenlangs_for_picker['US']); // English is the assumed source language.
         $spokenlabels = json_encode([
+            'mode' => 'pair',
             'header_email' => get_string('interpretation_email', 'mod_zoomyt'),
-            'header_language' => get_string('interpretation_language', 'mod_zoomyt'),
+            'header_lang_from' => get_string('interpretation_lang_from', 'mod_zoomyt'),
+            'header_lang_to' => get_string('interpretation_lang_to', 'mod_zoomyt'),
             'header_actions' => get_string('actions', 'mod_zoomyt'),
             'empty' => get_string('interpretation_none', 'mod_zoomyt'),
             'add' => get_string('interpretation_add_interpreter', 'mod_zoomyt'),
@@ -829,10 +829,10 @@ class mod_zoomyt_mod_form extends moodleform_mod {
             'placeholder_lang' => get_string('choosedots'),
             'err_email' => get_string('err_interpretation_email', 'mod_zoomyt'),
             'err_lang' => get_string('err_interpretation_lang_required', 'mod_zoomyt'),
+            'err_same' => get_string('err_interpretation_same_languages', 'mod_zoomyt'),
             'err_duplicate' => get_string('err_interpretation_duplicate', 'mod_zoomyt'),
-            'languages' => $spokenlangs_for_picker,
+            'languages' => $spokenlangs,
             'all_languages' => $spokenlangs,
-            'source_code' => 'US',
         ]);
         $mform->addElement(
             'html',
@@ -860,6 +860,7 @@ class mod_zoomyt_mod_form extends moodleform_mod {
 
         $signlangs = zoomyt_get_sign_languages();
         $signlabels = json_encode([
+            'mode' => 'single',
             'header_email' => get_string('interpretation_email', 'mod_zoomyt'),
             'header_language' => get_string('sign_interp_lang', 'mod_zoomyt'),
             'header_actions' => get_string('actions', 'mod_zoomyt'),
@@ -873,7 +874,6 @@ class mod_zoomyt_mod_form extends moodleform_mod {
             'err_duplicate' => get_string('err_interpretation_duplicate', 'mod_zoomyt'),
             'languages' => $signlangs,
             'all_languages' => $signlangs,
-            'source_code' => '',
         ]);
         $mform->addElement(
             'html',
@@ -1368,13 +1368,18 @@ class mod_zoomyt_mod_form extends moodleform_mod {
                 $validlangs = zoomyt_get_interpretation_languages();
                 foreach ($rows as $row) {
                     $email = trim((string) ($row['email'] ?? ''));
-                    $lang = trim((string) ($row['language'] ?? ''));
+                    $from = strtoupper(trim((string) ($row['lang_from'] ?? '')));
+                    $to = strtoupper(trim((string) ($row['lang_to'] ?? '')));
                     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
                         $errors['interpretation_enable'] = get_string('err_interpretation_email', 'mod_zoomyt');
                         break;
                     }
-                    if (!isset($validlangs[$lang]) || $lang === 'US') {
+                    if (!isset($validlangs[$from]) || !isset($validlangs[$to])) {
                         $errors['interpretation_enable'] = get_string('err_interpretation_lang_required', 'mod_zoomyt');
+                        break;
+                    }
+                    if ($from === $to) {
+                        $errors['interpretation_enable'] = get_string('err_interpretation_same_languages', 'mod_zoomyt');
                         break;
                     }
                 }

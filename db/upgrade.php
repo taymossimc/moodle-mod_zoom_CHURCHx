@@ -1673,5 +1673,10 @@ function xmldb_zoomyt_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026051201, 'zoomyt');
     }
 
+    if ($oldversion < 2026051202) {
+        // v2.7.4: spoken interpreter editor switched to From/To language pair; no schema changes.
+        upgrade_mod_savepoint(true, 2026051202, 'zoomyt');
+    }
+
     return true;
 }

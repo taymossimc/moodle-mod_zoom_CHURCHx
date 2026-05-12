@@ -1631,7 +1631,6 @@ function xmldb_zoomyt_upgrade($oldversion) {
             $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
             $table->add_key('zoomid_foreign', XMLDB_KEY_FOREIGN, ['zoomid'], 'zoomyt', ['id']);
 
-            $table->add_index('zoomid_idx', XMLDB_INDEX_NOTUNIQUE, ['zoomid']);
             $table->add_index('zoomid_start_idx', XMLDB_INDEX_NOTUNIQUE, ['zoomid', 'start_time']);
 
             $dbman->create_table($table);
@@ -1648,6 +1647,20 @@ function xmldb_zoomyt_upgrade($oldversion) {
     if ($oldversion < 2026030911) {
         // v2.7: version bump only (no schema changes).
         upgrade_mod_savepoint(true, 2026030911, 'zoomyt');
+    }
+
+    if ($oldversion < 2026051112) {
+        // v2.7.1: drop the redundant zoomid index on zoomyt_custom_occurrences if it exists.
+        // The foreign key already creates an index on that column, so the explicit one collided on install.
+        $table = new xmldb_table('zoomyt_custom_occurrences');
+        if ($dbman->table_exists($table)) {
+            $index = new xmldb_index('zoomid_idx', XMLDB_INDEX_NOTUNIQUE, ['zoomid']);
+            if ($dbman->index_exists($table, $index)) {
+                $dbman->drop_index($table, $index);
+            }
+        }
+
+        upgrade_mod_savepoint(true, 2026051112, 'zoomyt');
     }
 
     return true;

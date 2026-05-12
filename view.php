@@ -371,7 +371,8 @@ if ($showschedule) {
                     $pair = array_map('trim', explode(',', $row['languages'] ?? ''));
                     $label = (isset($pair[0], $langs[$pair[0]]) ? $langs[$pair[0]] : ($pair[0] ?? '')) . ' ↔ ' .
                         (isset($pair[1], $langs[$pair[1]]) ? $langs[$pair[1]] : ($pair[1] ?? ''));
-                    $interp[] = '• ' . s($label);
+                    $email = !empty($row['email']) ? ' (' . s($row['email']) . ')' : '';
+                    $interp[] = '• ' . s($label) . $email;
                 }
             }
         }
@@ -382,7 +383,8 @@ if ($showschedule) {
             if (is_array($signdata)) {
                 foreach ($signdata as $row) {
                     $code = $row['sign_language'] ?? '';
-                    $interp[] = '• ' . s($signlangs[$code] ?? $code);
+                    $email = !empty($row['email']) ? ' (' . s($row['email']) . ')' : '';
+                    $interp[] = '• ' . s($signlangs[$code] ?? $code) . $email;
                 }
             }
         }

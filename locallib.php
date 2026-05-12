@@ -223,56 +223,59 @@ function zoomyt_get_sign_languages(): array {
 }
 
 /**
- * Build the spoken-language interpreters array from per-row form arrays.
+ * Build the spoken-language interpreters array from the editor's row JSON.
  *
- * Zoom requires each entry to contain `email` and `languages` (a comma-separated string
- * with exactly two distinct country codes).
+ * The form submits an array of `{email, language}` rows where `language` is the
+ * 2-letter Zoom country code the interpreter translates to/from English. Zoom's
+ * API expects `languages` as a comma-separated pair, so we pair every selected
+ * language with English ("US").
  *
- * @param array $emails
- * @param array $langa
- * @param array $langb
+ * @param array $rows Decoded JSON array of {email, language}.
  * @return array Sanitized interpreters ready for `language_interpretation.interpreters`.
  */
-function zoomyt_build_interpretation_payload(array $emails, array $langa, array $langb): array {
+function zoomyt_build_spoken_payload_from_rows(array $rows): array {
     $valid = zoomyt_get_interpretation_languages();
     $out = [];
-    $count = max(count($emails), count($langa), count($langb));
-    for ($i = 0; $i < $count; $i++) {
-        $email = trim((string) ($emails[$i] ?? ''));
-        $a = trim((string) ($langa[$i] ?? ''));
-        $b = trim((string) ($langb[$i] ?? ''));
-        if ($email === '' && $a === '' && $b === '') {
+    $seen = [];
+    foreach ($rows as $row) {
+        $email = trim((string) ($row['email'] ?? ''));
+        $lang = trim((string) ($row['language'] ?? ''));
+        if ($email === '' || $lang === '' || $lang === 'US') {
             continue;
         }
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             continue;
         }
-        if (!isset($valid[$a]) || !isset($valid[$b]) || $a === $b) {
+        if (!isset($valid[$lang])) {
             continue;
         }
+        $key = strtolower($email);
+        if (isset($seen[$key])) {
+            continue;
+        }
+        $seen[$key] = true;
         $out[] = [
             'email' => $email,
-            'languages' => $a . ',' . $b,
+            'languages' => 'US,' . $lang,
         ];
     }
     return $out;
 }
 
 /**
- * Build the sign-language interpreters array from per-row form arrays.
+ * Build the sign-language interpreters array from the editor's row JSON.
  *
- * @param array $emails
- * @param array $signs
- * @return array
+ * @param array $rows Decoded JSON array of {email, language} (language = literal Zoom label).
+ * @return array Sanitized interpreters ready for `sign_language_interpretation.interpreters`.
  */
-function zoomyt_build_sign_interpretation_payload(array $emails, array $signs): array {
+function zoomyt_build_sign_payload_from_rows(array $rows): array {
     $valid = zoomyt_get_sign_languages();
     $out = [];
-    $count = max(count($emails), count($signs));
-    for ($i = 0; $i < $count; $i++) {
-        $email = trim((string) ($emails[$i] ?? ''));
-        $sign = trim((string) ($signs[$i] ?? ''));
-        if ($email === '' && $sign === '') {
+    $seen = [];
+    foreach ($rows as $row) {
+        $email = trim((string) ($row['email'] ?? ''));
+        $sign = trim((string) ($row['language'] ?? ''));
+        if ($email === '' || $sign === '') {
             continue;
         }
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -281,12 +284,82 @@ function zoomyt_build_sign_interpretation_payload(array $emails, array $signs): 
         if (!isset($valid[$sign])) {
             continue;
         }
+        $key = strtolower($email);
+        if (isset($seen[$key])) {
+            continue;
+        }
+        $seen[$key] = true;
         $out[] = [
             'email' => $email,
             'sign_language' => $sign,
         ];
     }
     return $out;
+}
+
+/**
+ * Convert stored spoken-interpretation JSON (Zoom payload) back into editor rows.
+ *
+ * The stored format has `languages` as "US,XX"; the editor only cares about the
+ * non-English partner code.
+ *
+ * @param string|null $jsondata Raw `interpretation_data` column value.
+ * @return array<int,array{email:string,language:string}>
+ */
+function zoomyt_rows_from_spoken_data($jsondata): array {
+    if (empty($jsondata)) {
+        return [];
+    }
+    $arr = json_decode($jsondata, true);
+    if (!is_array($arr)) {
+        return [];
+    }
+    $rows = [];
+    foreach ($arr as $row) {
+        $email = trim((string) ($row['email'] ?? ''));
+        if ($email === '') {
+            continue;
+        }
+        $pair = array_map('trim', explode(',', (string) ($row['languages'] ?? '')));
+        $lang = '';
+        foreach ($pair as $code) {
+            if ($code !== '' && strtoupper($code) !== 'US') {
+                $lang = strtoupper($code);
+                break;
+            }
+        }
+        if ($lang === '' && !empty($pair)) {
+            $lang = strtoupper(end($pair));
+        }
+        $rows[] = ['email' => $email, 'language' => $lang];
+    }
+    return $rows;
+}
+
+/**
+ * Convert stored sign-interpretation JSON (Zoom payload) back into editor rows.
+ *
+ * @param string|null $jsondata Raw `sign_interpretation_data` column value.
+ * @return array<int,array{email:string,language:string}>
+ */
+function zoomyt_rows_from_sign_data($jsondata): array {
+    if (empty($jsondata)) {
+        return [];
+    }
+    $arr = json_decode($jsondata, true);
+    if (!is_array($arr)) {
+        return [];
+    }
+    $rows = [];
+    foreach ($arr as $row) {
+        $email = trim((string) ($row['email'] ?? ''));
+        $sign = trim((string) ($row['sign_language'] ?? ''));
+        if ($email === '') {
+            continue;
+        }
+        $rows[] = ['email' => $email, 'language' => $sign];
+    }
+    return $rows;
 }
 
 /**

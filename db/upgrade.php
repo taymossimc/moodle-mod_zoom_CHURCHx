@@ -1668,5 +1668,10 @@ function xmldb_zoomyt_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026051200, 'zoomyt');
     }
 
+    if ($oldversion < 2026051201) {
+        // v2.7.3: interpreter editor rebuilt as a JS table; no schema changes.
+        upgrade_mod_savepoint(true, 2026051201, 'zoomyt');
+    }
+
     return true;
 }

@@ -359,14 +359,32 @@ if ($showschedule) {
         }
     }
 
-    // Interpretation notice.
+    // Interpretation notice with interpreter details.
     if (!empty($zoom->interpretation_enable) || !empty($zoom->sign_interpretation_enable)) {
         $interp = [];
         if (!empty($zoom->interpretation_enable)) {
-            $interp[] = get_string('interpretation_notice_spoken', 'mod_zoomyt');
+            $interp[] = html_writer::tag('strong', get_string('interpretation_notice_spoken', 'mod_zoomyt'));
+            $spokendata = !empty($zoom->interpretation_data) ? json_decode($zoom->interpretation_data, true) : [];
+            $langs = zoomyt_get_interpretation_languages();
+            if (is_array($spokendata)) {
+                foreach ($spokendata as $row) {
+                    $pair = array_map('trim', explode(',', $row['languages'] ?? ''));
+                    $label = (isset($pair[0], $langs[$pair[0]]) ? $langs[$pair[0]] : ($pair[0] ?? '')) . ' ↔ ' .
+                        (isset($pair[1], $langs[$pair[1]]) ? $langs[$pair[1]] : ($pair[1] ?? ''));
+                    $interp[] = '• ' . s($label);
+                }
+            }
         }
         if (!empty($zoom->sign_interpretation_enable)) {
-            $interp[] = get_string('interpretation_notice_sign', 'mod_zoomyt');
+            $interp[] = html_writer::tag('strong', get_string('interpretation_notice_sign', 'mod_zoomyt'));
+            $signdata = !empty($zoom->sign_interpretation_data) ? json_decode($zoom->sign_interpretation_data, true) : [];
+            $signlangs = zoomyt_get_sign_languages();
+            if (is_array($signdata)) {
+                foreach ($signdata as $row) {
+                    $code = $row['sign_language'] ?? '';
+                    $interp[] = '• ' . s($signlangs[$code] ?? $code);
+                }
+            }
         }
         $rowinterp = new html_table_row();
         $rowinterp->id = 'zoom_schedule-interpretation';

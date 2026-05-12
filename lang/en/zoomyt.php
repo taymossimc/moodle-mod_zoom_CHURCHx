@@ -740,24 +740,54 @@ $string['retry_upload'] = 'Retry Upload';
 $string['retry_upload_success'] = 'YouTube upload retry completed successfully.';
 $string['retry_upload_error'] = 'YouTube upload retry failed: {$a}';
 
-// Custom recurrence & interpretation (v2.6.16).
+// Custom recurrence & interpretation (v2.6.16+).
 $string['recurrence_option_custom'] = 'Custom dates (session list)';
 $string['customdates_help'] = 'List each session below with date/time and duration (minutes). Zoom provides one meeting link for all sessions; Moodle stores the schedule and adds calendar entries.';
 $string['customdates_add'] = 'Add session';
 $string['customdates_remove'] = 'Remove';
 $string['customdates_sessions'] = 'Scheduled sessions';
+$string['customdates_timezone'] = 'Times entered below are in your account timezone: {$a}';
 $string['err_customdates_required'] = 'Add at least one session for custom recurrence.';
 $string['err_customdates_past'] = 'When creating the activity, each session must start today or later.';
 $string['interpretation'] = 'Interpretation';
 $string['interpretation_enable'] = 'Enable spoken-language interpretation';
-$string['interpretation_enable_desc'] = 'Interpreters must be users on your Zoom account. Each line lists an email and comma-separated Zoom interpretation language codes.';
-$string['interpretation_spoken_lines'] = 'Spoken interpreters';
-$string['interpretation_spoken_lines_help'] = 'One interpreter per line: <code>email,lang1,lang2</code> using Zoom codes (e.g. <code>US</code> English, <code>ES</code> Spanish).';
+$string['interpretation_enable_desc'] = 'Interpreters must already exist as users on your Zoom account. Add one row per interpreter and select the two languages they will translate between.';
+$string['interpretation_email'] = 'Interpreter email';
+$string['interpretation_email_help'] = 'The email address must match an active user on your Zoom account; otherwise Zoom will reject the meeting create/update call.';
+$string['interpretation_lang_a'] = 'Language A';
+$string['interpretation_lang_b'] = 'Language B';
+$string['interpretation_add_interpreter'] = 'Add interpreter';
 $string['sign_interpretation_enable'] = 'Enable sign language interpretation';
-$string['sign_interpretation_enable_desc'] = 'One interpreter per line: email and sign language (e.g. American, Chinese, French, German, Italian, Japanese, Korean, Portuguese, Russian, Spanish).';
-$string['interpretation_sign_lines'] = 'Sign language interpreters';
-$string['interpretation_sign_lines_help'] = 'One per line: <code>email,SignLanguage</code> (e.g. <code>interpreter@example.edu,American</code>).';
+$string['sign_interpretation_enable_desc'] = 'Add one row per sign-language interpreter and choose their sign language.';
+$string['sign_interp_lang'] = 'Sign language';
+$string['err_interpretation_email'] = 'Enter a valid interpreter email (a Zoom user on your account).';
+$string['err_interpretation_langpair'] = 'Choose two different languages for the interpreter pair.';
+$string['err_interpretation_signlang'] = 'Choose a sign language for this interpreter.';
+$string['err_interpretation_required'] = 'Add at least one interpreter or disable interpretation.';
 $string['breakoutrooms_enable'] = 'Allow breakout rooms during the meeting';
 $string['breakoutrooms_enable_desc'] = 'The host can create breakout rooms in the meeting without defining rooms here. Co-hosts can assist if your Zoom account allows co-hosts to manage breakout rooms.';
-$string['interpretation_notice_spoken'] = 'Spoken-language interpretation is available in this meeting.';
-$string['interpretation_notice_sign'] = 'Sign language interpretation is available in this meeting.';
+$string['interpretation_notice_spoken'] = 'Spoken-language interpretation is available in this meeting:';
+$string['interpretation_notice_sign'] = 'Sign language interpretation is available in this meeting:';
+
+// Interpretation language labels (Zoom 2-letter country codes for spoken interpretation).
+$string['interp_lang_us'] = 'English';
+$string['interp_lang_cn'] = 'Chinese';
+$string['interp_lang_jp'] = 'Japanese';
+$string['interp_lang_de'] = 'German';
+$string['interp_lang_fr'] = 'French';
+$string['interp_lang_ru'] = 'Russian';
+$string['interp_lang_pt'] = 'Portuguese';
+$string['interp_lang_es'] = 'Spanish';
+$string['interp_lang_kr'] = 'Korean';
+
+// Sign language labels (literal Zoom values).
+$string['sign_lang_american'] = 'American Sign Language';
+$string['sign_lang_chinese'] = 'Chinese Sign Language';
+$string['sign_lang_french'] = 'French Sign Language';
+$string['sign_lang_german'] = 'German Sign Language';
+$string['sign_lang_italian'] = 'Italian Sign Language';
+$string['sign_lang_japanese'] = 'Japanese Sign Language';
+$string['sign_lang_korean'] = 'Korean Sign Language';
+$string['sign_lang_portuguese'] = 'Portuguese Sign Language';
+$string['sign_lang_russian'] = 'Russian Sign Language';
+$string['sign_lang_spanish'] = 'Spanish Sign Language';

@@ -46,7 +46,7 @@ class mod_zoomyt_mod_form extends moodleform_mod {
      * Defines forms elements
      */
     public function definition() {
-        global $PAGE, $USER, $OUTPUT;
+        global $PAGE, $USER, $OUTPUT, $DB;
 
         // We don't do anything custom with completion data, so avoid doing any unnecessary work.
         $completionpagetypes = [
@@ -61,6 +61,8 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         $config = get_config('zoomyt');
         $PAGE->requires->js_call_amd("mod_zoomyt/form", 'init');
         $PAGE->requires->js_call_amd("mod_zoomyt/customdates", 'init');
+        // Load language strings used by the JS modules so M.util.get_string finds them.
+        $PAGE->requires->strings_for_js(['room'], 'zoomyt');
 
         $isnew = empty($this->_cm);
 
@@ -329,15 +331,19 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         $mform->hideIf('customdates_help', 'recurrence_type', 'noteq', ZOOM_RECURRINGTYPE_CUSTOM);
         $mform->hideIf('customdates_help', 'recurring', 'notchecked');
 
+        $usertimezone = core_date::get_user_timezone();
         $customdatelabels = json_encode([
             'add' => get_string('customdates_add', 'mod_zoomyt'),
             'remove' => get_string('customdates_remove', 'mod_zoomyt'),
             'when' => get_string('start_time', 'mod_zoomyt'),
             'duration' => get_string('duration', 'mod_zoomyt'),
+            'timezone' => get_string('customdates_timezone', 'mod_zoomyt', $usertimezone),
         ]);
         $mform->addElement(
             'html',
-            '<div id="zoomyt-custom-dates-root" class="mb-3" data-labels="' . htmlspecialchars($customdatelabels, ENT_QUOTES, 'UTF-8') . '"></div>'
+            '<div id="zoomyt-custom-dates-root" class="mb-3" data-labels="' .
+                htmlspecialchars($customdatelabels, ENT_QUOTES, 'UTF-8') .
+                '" data-timezone="' . htmlspecialchars($usertimezone, ENT_QUOTES, 'UTF-8') . '"></div>'
         );
         $mform->addElement('hidden', 'custom_occurrences_json', '');
         $mform->setType('custom_occurrences_json', PARAM_RAW);
@@ -803,14 +809,57 @@ class mod_zoomyt_mod_form extends moodleform_mod {
             get_string('interpretation_enable_desc', 'mod_zoomyt')
         );
         $mform->addHelpButton('interpretation_enable', 'interpretation_enable', 'mod_zoomyt');
-        $mform->addElement(
-            'textarea',
-            'interpretation_spoken_lines',
-            get_string('interpretation_spoken_lines', 'mod_zoomyt'),
-            ['rows' => 5, 'cols' => 70, 'wrap' => 'virtual']
+
+        // Spoken interpreter rows: email + two language dropdowns + delete checkbox (repeated_elements).
+        $languagechoices = ['' => get_string('choosedots')] + zoomyt_get_interpretation_languages();
+        $spokengroup = [
+            $mform->createElement(
+                'text',
+                'interp_email',
+                get_string('interpretation_email', 'mod_zoomyt'),
+                ['size' => 32]
+            ),
+            $mform->createElement(
+                'select',
+                'interp_lang_a',
+                get_string('interpretation_lang_a', 'mod_zoomyt'),
+                $languagechoices
+            ),
+            $mform->createElement(
+                'select',
+                'interp_lang_b',
+                get_string('interpretation_lang_b', 'mod_zoomyt'),
+                $languagechoices
+            ),
+        ];
+        $repeatoptions = [
+            'interp_email' => ['type' => PARAM_EMAIL, 'helpbutton' => ['interpretation_email', 'mod_zoomyt']],
+            'interp_lang_a' => ['type' => PARAM_ALPHANUMEXT],
+            'interp_lang_b' => ['type' => PARAM_ALPHANUMEXT],
+        ];
+        $repeatno = max(1, (int) optional_param('interpretation_repeats', 1, PARAM_INT));
+        // When editing a saved instance, ensure the form has at least as many groups as stored interpreters.
+        if (!empty($this->_instance)) {
+            $existing = $DB->get_field('zoomyt', 'interpretation_data', ['id' => $this->_instance]);
+            if (!empty($existing)) {
+                $decoded = json_decode($existing, true);
+                if (is_array($decoded)) {
+                    $repeatno = max($repeatno, count($decoded));
+                }
+            }
+        }
+        $this->repeat_elements(
+            $spokengroup,
+            $repeatno,
+            $repeatoptions,
+            'interpretation_repeats',
+            'interpretation_add_more',
+            1,
+            get_string('interpretation_add_interpreter', 'mod_zoomyt'),
+            false
         );
-        $mform->setType('interpretation_spoken_lines', PARAM_RAW);
-        $mform->addHelpButton('interpretation_spoken_lines', 'interpretation_spoken_lines', 'mod_zoomyt');
+        $mform->hideIf('interpretation_repeats', 'interpretation_enable', 'eq', 0);
+        $mform->hideIf('interpretation_add_more', 'interpretation_enable', 'eq', 0);
 
         $mform->addElement(
             'advcheckbox',
@@ -819,14 +868,49 @@ class mod_zoomyt_mod_form extends moodleform_mod {
             get_string('sign_interpretation_enable_desc', 'mod_zoomyt')
         );
         $mform->addHelpButton('sign_interpretation_enable', 'sign_interpretation_enable', 'mod_zoomyt');
-        $mform->addElement(
-            'textarea',
-            'interpretation_sign_lines',
-            get_string('interpretation_sign_lines', 'mod_zoomyt'),
-            ['rows' => 4, 'cols' => 70, 'wrap' => 'virtual']
+
+        // Sign interpreter rows: email + sign language dropdown.
+        $signchoices = ['' => get_string('choosedots')] + zoomyt_get_sign_languages();
+        $signgroup = [
+            $mform->createElement(
+                'text',
+                'sign_interp_email',
+                get_string('interpretation_email', 'mod_zoomyt'),
+                ['size' => 32]
+            ),
+            $mform->createElement(
+                'select',
+                'sign_interp_lang',
+                get_string('sign_interp_lang', 'mod_zoomyt'),
+                $signchoices
+            ),
+        ];
+        $signoptions = [
+            'sign_interp_email' => ['type' => PARAM_EMAIL],
+            'sign_interp_lang' => ['type' => PARAM_ALPHA],
+        ];
+        $signrepeatno = max(1, (int) optional_param('sign_interpretation_repeats', 1, PARAM_INT));
+        if (!empty($this->_instance)) {
+            $existingsign = $DB->get_field('zoomyt', 'sign_interpretation_data', ['id' => $this->_instance]);
+            if (!empty($existingsign)) {
+                $decodedsign = json_decode($existingsign, true);
+                if (is_array($decodedsign)) {
+                    $signrepeatno = max($signrepeatno, count($decodedsign));
+                }
+            }
+        }
+        $this->repeat_elements(
+            $signgroup,
+            $signrepeatno,
+            $signoptions,
+            'sign_interpretation_repeats',
+            'sign_interpretation_add_more',
+            1,
+            get_string('interpretation_add_interpreter', 'mod_zoomyt'),
+            false
         );
-        $mform->setType('interpretation_sign_lines', PARAM_RAW);
-        $mform->addHelpButton('interpretation_sign_lines', 'interpretation_sign_lines', 'mod_zoomyt');
+        $mform->hideIf('sign_interpretation_repeats', 'sign_interpretation_enable', 'eq', 0);
+        $mform->hideIf('sign_interpretation_add_more', 'sign_interpretation_enable', 'eq', 0);
 
         // Check if there is any setting to be shown in the "host" fieldset.
         $showschedulingprivilege = ($config->showschedulingprivilege != ZOOM_SCHEDULINGPRIVILEGE_DISABLE) &&
@@ -1139,20 +1223,29 @@ class mod_zoomyt_mod_form extends moodleform_mod {
 
         // Spoken / sign interpretation: serialize to JSON for the database.
         if (!empty($data->interpretation_enable)) {
-            $spoken = zoomyt_parse_interpretation_lines($data->interpretation_spoken_lines ?? '');
+            $spoken = zoomyt_build_interpretation_payload(
+                (array) ($data->interp_email ?? []),
+                (array) ($data->interp_lang_a ?? []),
+                (array) ($data->interp_lang_b ?? [])
+            );
             $data->interpretation_data = json_encode($spoken);
         } else {
             $data->interpretation_data = null;
         }
-        unset($data->interpretation_spoken_lines);
+        unset($data->interp_email, $data->interp_lang_a, $data->interp_lang_b);
+        unset($data->interpretation_repeats, $data->interpretation_add_more);
 
         if (!empty($data->sign_interpretation_enable)) {
-            $sign = zoomyt_parse_sign_interpretation_lines($data->interpretation_sign_lines ?? '');
+            $sign = zoomyt_build_sign_interpretation_payload(
+                (array) ($data->sign_interp_email ?? []),
+                (array) ($data->sign_interp_lang ?? [])
+            );
             $data->sign_interpretation_data = json_encode($sign);
         } else {
             $data->sign_interpretation_data = null;
         }
-        unset($data->interpretation_sign_lines);
+        unset($data->sign_interp_email, $data->sign_interp_lang);
+        unset($data->sign_interpretation_repeats, $data->sign_interpretation_add_more);
 
         // Pre-assigned breakout rooms imply breakout rooms enabled.
         if (!empty($data->rooms)) {
@@ -1187,30 +1280,48 @@ class mod_zoomyt_mod_form extends moodleform_mod {
             $defaultvalues['custom_occurrences_json'] = json_encode($json);
         }
 
-        // Interpretation lines from stored JSON.
+        // Interpretation rows from stored JSON.
         if (!empty($defaultvalues['interpretation_data'])) {
             $arr = json_decode($defaultvalues['interpretation_data'], true);
-            $lines = [];
+            $emails = [];
+            $langa = [];
+            $langb = [];
             if (is_array($arr)) {
                 foreach ($arr as $row) {
-                    if (!empty($row['email']) && isset($row['languages'])) {
-                        $lines[] = $row['email'] . ',' . $row['languages'];
+                    if (empty($row['email']) || empty($row['languages'])) {
+                        continue;
                     }
+                    $pair = array_map('trim', explode(',', $row['languages']));
+                    $emails[] = $row['email'];
+                    $langa[] = $pair[0] ?? '';
+                    $langb[] = $pair[1] ?? '';
                 }
             }
-            $defaultvalues['interpretation_spoken_lines'] = implode("\n", $lines);
+            if ($emails) {
+                $defaultvalues['interp_email'] = $emails;
+                $defaultvalues['interp_lang_a'] = $langa;
+                $defaultvalues['interp_lang_b'] = $langb;
+                $defaultvalues['interpretation_repeats'] = count($emails);
+            }
         }
         if (!empty($defaultvalues['sign_interpretation_data'])) {
             $arr = json_decode($defaultvalues['sign_interpretation_data'], true);
-            $lines = [];
+            $emails = [];
+            $signs = [];
             if (is_array($arr)) {
                 foreach ($arr as $row) {
-                    if (!empty($row['email']) && !empty($row['sign_language'])) {
-                        $lines[] = $row['email'] . ',' . $row['sign_language'];
+                    if (empty($row['email']) || empty($row['sign_language'])) {
+                        continue;
                     }
+                    $emails[] = $row['email'];
+                    $signs[] = $row['sign_language'];
                 }
             }
-            $defaultvalues['interpretation_sign_lines'] = implode("\n", $lines);
+            if ($emails) {
+                $defaultvalues['sign_interp_email'] = $emails;
+                $defaultvalues['sign_interp_lang'] = $signs;
+                $defaultvalues['sign_interpretation_repeats'] = count($emails);
+            }
         }
 
         // Get config.
@@ -1316,6 +1427,60 @@ class mod_zoomyt_mod_form extends moodleform_mod {
 
         if (!empty($data['requirepasscode']) && empty($data['meetingcode'])) {
             $errors['meetingcode'] = get_string('err_password_required', 'mod_zoomyt');
+        }
+
+        // Validate spoken interpretation rows.
+        if (!empty($data['interpretation_enable'])) {
+            $emails = (array) ($data['interp_email'] ?? []);
+            $langa = (array) ($data['interp_lang_a'] ?? []);
+            $langb = (array) ($data['interp_lang_b'] ?? []);
+            $haveany = false;
+            $validlangs = zoomyt_get_interpretation_languages();
+            $count = max(count($emails), count($langa), count($langb));
+            for ($i = 0; $i < $count; $i++) {
+                $email = trim((string) ($emails[$i] ?? ''));
+                $a = trim((string) ($langa[$i] ?? ''));
+                $b = trim((string) ($langb[$i] ?? ''));
+                if ($email === '' && $a === '' && $b === '') {
+                    continue;
+                }
+                $haveany = true;
+                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $errors["interp_email[$i]"] = get_string('err_interpretation_email', 'mod_zoomyt');
+                }
+                if (!isset($validlangs[$a]) || !isset($validlangs[$b]) || $a === $b) {
+                    $errors["interp_lang_a[$i]"] = get_string('err_interpretation_langpair', 'mod_zoomyt');
+                }
+            }
+            if (!$haveany) {
+                $errors['interp_email[0]'] = get_string('err_interpretation_required', 'mod_zoomyt');
+            }
+        }
+
+        // Validate sign interpretation rows.
+        if (!empty($data['sign_interpretation_enable'])) {
+            $semails = (array) ($data['sign_interp_email'] ?? []);
+            $signs = (array) ($data['sign_interp_lang'] ?? []);
+            $haveany = false;
+            $validsign = zoomyt_get_sign_languages();
+            $count = max(count($semails), count($signs));
+            for ($i = 0; $i < $count; $i++) {
+                $email = trim((string) ($semails[$i] ?? ''));
+                $sign = trim((string) ($signs[$i] ?? ''));
+                if ($email === '' && $sign === '') {
+                    continue;
+                }
+                $haveany = true;
+                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $errors["sign_interp_email[$i]"] = get_string('err_interpretation_email', 'mod_zoomyt');
+                }
+                if (!isset($validsign[$sign])) {
+                    $errors["sign_interp_lang[$i]"] = get_string('err_interpretation_signlang', 'mod_zoomyt');
+                }
+            }
+            if (!$haveany) {
+                $errors['sign_interp_email[0]'] = get_string('err_interpretation_required', 'mod_zoomyt');
+            }
         }
 
         if (isset($data['schedule_for']) && strtolower($data['schedule_for']) !== strtolower(zoomyt_get_api_identifier($USER))) {

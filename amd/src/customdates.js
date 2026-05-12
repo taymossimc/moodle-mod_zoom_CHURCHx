@@ -77,13 +77,16 @@ define(['jquery'], function($) {
         var dur = (data && data.duration) ? data.duration : 60;
         var $tr = $('<tr></tr>');
         $tr.append(
-            '<td><label class="accesshide">' + labels.when + '</label>' +
-            '<input type="datetime-local" class="form-control zoomyt-cd-time" value="' + startVal + '" step="300"/></td>'
+            '<td style="width: 240px;"><label class="accesshide">' + labels.when + '</label>' +
+            '<input type="datetime-local" class="form-control zoomyt-cd-time" ' +
+            'style="max-width: 230px;" value="' + startVal + '" step="300"/></td>'
         );
         $tr.append(
-            '<td><label class="accesshide">' + labels.duration + '</label>' +
-            '<input type="number" class="form-control zoomyt-cd-duration" min="1" max="9000" value="' + dur + '"/> ' +
-            '<span class="text-muted small">min</span></td>'
+            '<td style="width: 140px;"><label class="accesshide">' + labels.duration + '</label>' +
+            '<div class="input-group" style="max-width: 130px;">' +
+            '<input type="number" class="form-control zoomyt-cd-duration" min="1" max="9000" value="' + dur + '"/>' +
+            '<span class="input-group-append"><span class="input-group-text">min</span></span>' +
+            '</div></td>'
         );
         $tr.append(
             '<td><button type="button" class="btn btn-link text-danger zoomyt-cd-del" title="' + labels.remove + '">' +
@@ -98,7 +101,7 @@ define(['jquery'], function($) {
             if (!$root.length) {
                 return;
             }
-            var labels = {add: 'Add', remove: 'Remove', when: 'When', duration: 'Duration'};
+            var labels = {add: 'Add', remove: 'Remove', when: 'When', duration: 'Duration', timezone: ''};
             try {
                 var raw = $root.attr('data-labels');
                 if (raw) {
@@ -109,8 +112,10 @@ define(['jquery'], function($) {
             }
 
             var $form = $root.closest('form');
-            var table =
-                '<table class="generaltable w-100">' +
+            var tzNotice = labels.timezone ?
+                '<div class="text-muted small mb-2">' + labels.timezone + '</div>' : '';
+            var table = tzNotice +
+                '<table class="generaltable" style="width: auto;">' +
                 '<thead><tr><th scope="col">' + labels.when + '</th>' +
                 '<th scope="col">' + labels.duration + '</th><th scope="col"></th></tr></thead>' +
                 '<tbody></tbody></table>' +

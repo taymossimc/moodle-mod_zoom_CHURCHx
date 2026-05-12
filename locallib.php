@@ -178,62 +178,112 @@ function zoomyt_parse_custom_occurrences_json(?string $json): array {
 }
 
 /**
- * Build interpretation interpreters array from textarea lines "email,lang1,lang2".
+ * Spoken-language interpretation codes accepted by Zoom's `language_interpretation.interpreters[].languages`.
  *
- * @param string $text
- * @return array For Zoom API language_interpretation.interpreters
+ * Each entry maps a two-letter country/Zoom code to the localized display label.
+ * Zoom expects pairs (e.g. "US,PT") so the dropdown values are the country IDs from
+ * https://marketplace.zoom.us/docs/api-reference/other-references/abbreviation-lists#countries.
+ *
+ * @return array<string,string> code => localized label
  */
-function zoomyt_parse_interpretation_lines(string $text): array {
-    $lines = preg_split('/\R/', $text);
+function zoomyt_get_interpretation_languages(): array {
+    return [
+        'US' => get_string('interp_lang_us', 'zoomyt'),
+        'CN' => get_string('interp_lang_cn', 'zoomyt'),
+        'JP' => get_string('interp_lang_jp', 'zoomyt'),
+        'DE' => get_string('interp_lang_de', 'zoomyt'),
+        'FR' => get_string('interp_lang_fr', 'zoomyt'),
+        'RU' => get_string('interp_lang_ru', 'zoomyt'),
+        'PT' => get_string('interp_lang_pt', 'zoomyt'),
+        'ES' => get_string('interp_lang_es', 'zoomyt'),
+        'KR' => get_string('interp_lang_kr', 'zoomyt'),
+    ];
+}
+
+/**
+ * Sign-language interpretation languages accepted by Zoom's `sign_language_interpretation.interpreters[].sign_language`.
+ *
+ * Values are the literal English labels Zoom expects in the API payload.
+ *
+ * @return array<string,string> value => localized label
+ */
+function zoomyt_get_sign_languages(): array {
+    return [
+        'American' => get_string('sign_lang_american', 'zoomyt'),
+        'Chinese' => get_string('sign_lang_chinese', 'zoomyt'),
+        'French' => get_string('sign_lang_french', 'zoomyt'),
+        'German' => get_string('sign_lang_german', 'zoomyt'),
+        'Italian' => get_string('sign_lang_italian', 'zoomyt'),
+        'Japanese' => get_string('sign_lang_japanese', 'zoomyt'),
+        'Korean' => get_string('sign_lang_korean', 'zoomyt'),
+        'Portuguese' => get_string('sign_lang_portuguese', 'zoomyt'),
+        'Russian' => get_string('sign_lang_russian', 'zoomyt'),
+        'Spanish' => get_string('sign_lang_spanish', 'zoomyt'),
+    ];
+}
+
+/**
+ * Build the spoken-language interpreters array from per-row form arrays.
+ *
+ * Zoom requires each entry to contain `email` and `languages` (a comma-separated string
+ * with exactly two distinct country codes).
+ *
+ * @param array $emails
+ * @param array $langa
+ * @param array $langb
+ * @return array Sanitized interpreters ready for `language_interpretation.interpreters`.
+ */
+function zoomyt_build_interpretation_payload(array $emails, array $langa, array $langb): array {
+    $valid = zoomyt_get_interpretation_languages();
     $out = [];
-    foreach ($lines as $line) {
-        $line = trim($line);
-        if ($line === '') {
+    $count = max(count($emails), count($langa), count($langb));
+    for ($i = 0; $i < $count; $i++) {
+        $email = trim((string) ($emails[$i] ?? ''));
+        $a = trim((string) ($langa[$i] ?? ''));
+        $b = trim((string) ($langb[$i] ?? ''));
+        if ($email === '' && $a === '' && $b === '') {
             continue;
         }
-        $parts = array_map('trim', explode(',', $line));
-        $email = array_shift($parts);
-        if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             continue;
         }
-        $langs = array_filter($parts);
-        if (empty($langs)) {
+        if (!isset($valid[$a]) || !isset($valid[$b]) || $a === $b) {
             continue;
         }
         $out[] = [
             'email' => $email,
-            'languages' => implode(',', $langs),
+            'languages' => $a . ',' . $b,
         ];
     }
     return $out;
 }
 
 /**
- * Build sign language interpreters from lines "email,American" etc.
+ * Build the sign-language interpreters array from per-row form arrays.
  *
- * @param string $text
+ * @param array $emails
+ * @param array $signs
  * @return array
  */
-function zoomyt_parse_sign_interpretation_lines(string $text): array {
-    $lines = preg_split('/\R/', $text);
+function zoomyt_build_sign_interpretation_payload(array $emails, array $signs): array {
+    $valid = zoomyt_get_sign_languages();
     $out = [];
-    foreach ($lines as $line) {
-        $line = trim($line);
-        if ($line === '') {
+    $count = max(count($emails), count($signs));
+    for ($i = 0; $i < $count; $i++) {
+        $email = trim((string) ($emails[$i] ?? ''));
+        $sign = trim((string) ($signs[$i] ?? ''));
+        if ($email === '' && $sign === '') {
             continue;
         }
-        $pos = strpos($line, ',');
-        if ($pos === false) {
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             continue;
         }
-        $email = trim(substr($line, 0, $pos));
-        $signlang = trim(substr($line, $pos + 1));
-        if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL) || $signlang === '') {
+        if (!isset($valid[$sign])) {
             continue;
         }
         $out[] = [
             'email' => $email,
-            'sign_language' => $signlang,
+            'sign_language' => $sign,
         ];
     }
     return $out;

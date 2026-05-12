@@ -1678,5 +1678,10 @@ function xmldb_zoomyt_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026051202, 'zoomyt');
     }
 
+    if ($oldversion < 2026051203) {
+        // v2.7.5: widen custom-dates input columns; no schema changes.
+        upgrade_mod_savepoint(true, 2026051203, 'zoomyt');
+    }
+
     return true;
 }

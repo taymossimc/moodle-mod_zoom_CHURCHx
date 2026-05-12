@@ -77,13 +77,13 @@ define(['jquery'], function($) {
         var dur = (data && data.duration) ? data.duration : 60;
         var $tr = $('<tr></tr>');
         $tr.append(
-            '<td style="width: 240px;"><label class="accesshide">' + labels.when + '</label>' +
+            '<td style="width: 290px;"><label class="accesshide">' + labels.when + '</label>' +
             '<input type="datetime-local" class="form-control zoomyt-cd-time" ' +
-            'style="max-width: 230px;" value="' + startVal + '" step="300"/></td>'
+            'style="max-width: 280px;" value="' + startVal + '" step="300"/></td>'
         );
         $tr.append(
-            '<td style="width: 140px;"><label class="accesshide">' + labels.duration + '</label>' +
-            '<div class="input-group" style="max-width: 130px;">' +
+            '<td style="width: 170px;"><label class="accesshide">' + labels.duration + '</label>' +
+            '<div class="input-group" style="max-width: 160px;">' +
             '<input type="number" class="form-control zoomyt-cd-duration" min="1" max="9000" value="' + dur + '"/>' +
             '<span class="input-group-append"><span class="input-group-text">min</span></span>' +
             '</div></td>'

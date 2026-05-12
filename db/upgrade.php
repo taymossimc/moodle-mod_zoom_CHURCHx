@@ -1683,5 +1683,23 @@ function xmldb_zoomyt_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026051203, 'zoomyt');
     }
 
+    if ($oldversion < 2026051204) {
+        // v2.7.6: replace previously stored "[[room]] N" placeholder names that resulted from
+        // the breakout-room JS resolving the language string before strings_for_js had loaded.
+        $roomlabel = get_string('room', 'mod_zoomyt');
+        $table = new xmldb_table('zoomyt_breakout_rooms');
+        if ($dbman->table_exists($table)) {
+            $like = $DB->sql_like('name', ':needle');
+            $sql = "SELECT id, name FROM {zoomyt_breakout_rooms} WHERE $like";
+            $records = $DB->get_records_sql($sql, ['needle' => '%[[room]]%']);
+            foreach ($records as $rec) {
+                $fixed = str_replace('[[room]]', $roomlabel, $rec->name);
+                $DB->set_field('zoomyt_breakout_rooms', 'name', $fixed, ['id' => $rec->id]);
+            }
+        }
+
+        upgrade_mod_savepoint(true, 2026051204, 'zoomyt');
+    }
+
     return true;
 }

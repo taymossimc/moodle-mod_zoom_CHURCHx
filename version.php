@@ -25,8 +25,8 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'mod_zoomyt';
-$plugin->version = 2026051203;
-$plugin->release = 'v2.7.5';
+$plugin->version = 2026051204;
+$plugin->release = 'v2.7.6';
 $plugin->requires = 2019052000;
 $plugin->maturity = MATURITY_BETA;
 $plugin->cron = 0;

@@ -270,11 +270,33 @@ define(['jquery', 'core/form-autocomplete', 'core/str', 'core/notification'], fu
         this.roomItemDataToClone = $('#rooms-list-item-data').html();
         this.initialRoomsCount = parseInt(this.roomsListColumn.attr('data-initial-rooms-count'));
         this.tabsComponent = new TabsComponent(this.roomsListColumn, this.roomsDataColumn, this.initialRoomsCount, this.emptyAlert);
+        // Resolved label for "Room" once core/str returns; default to English while loading.
+        this.roomLabel = 'Room';
 
         // Add room event.
         this.init = function() {
+            var thisObject = this;
             var stringkeys = [{key: 'room', component: 'zoomyt'}];
-            str.get_strings(stringkeys).then(function() {
+            str.get_strings(stringkeys).then(function(results) {
+                if (results && results[0]) {
+                    thisObject.roomLabel = results[0];
+                    // Replace any saved server-side room names that contain the unresolved
+                    // placeholder so previously broken entries get cleaned up on edit.
+                    $('#mod-zoom-meeting-rooms-list .tab-name, ' +
+                      '#mod-zoom-meeting-rooms-data input.room-name, ' +
+                      '#mod-zoom-meeting-rooms-data input[type=hidden][name^="rooms["]').each(function() {
+                        var $el = $(this);
+                        var current = $el.is('input') ? $el.val() : $el.text();
+                        if (typeof current === 'string' && current.indexOf('[[room]]') !== -1) {
+                            var fixed = current.replace(/\[\[room\]\]/g, thisObject.roomLabel);
+                            if ($el.is('input')) {
+                                $el.val(fixed);
+                            } else {
+                                $el.text(fixed);
+                            }
+                        }
+                    });
+                }
                 return null;
             }).fail(notification.exception);
 
@@ -296,7 +318,16 @@ define(['jquery', 'core/form-autocomplete', 'core/str', 'core/notification'], fu
             thisObject.addBtn.click(function() {
                 thisObject.tabsComponent.countTabs++;
 
-                var newRoomName = M.util.get_string('room', 'zoomyt') + ' ' + thisObject.tabsComponent.countTabs;
+                // Prefer the resolved label cached during init; fall back to a literal "Room"
+                // so we never persist the Moodle `[[room]]` placeholder in the database.
+                var label = thisObject.roomLabel;
+                if (!label || label === '[[room]]') {
+                    label = M.util.get_string('room', 'zoomyt');
+                }
+                if (!label || label === '[[room]]') {
+                    label = 'Room';
+                }
+                var newRoomName = label + ' ' + thisObject.tabsComponent.countTabs;
                 var newRoomElement = $(thisObject.roomItemToClone);
                 var newRoomDataElement = $(thisObject.roomItemDataToClone);
                 var newRoomIndex = thisObject.tabsComponent.countTabs;

@@ -50,8 +50,8 @@ define('ZOOM_RECURRING_WEBINAR', 6);
 define('ZOOM_RECURRING_FIXED_MEETING', 8);
 define('ZOOM_RECURRING_FIXED_WEBINAR', 9);
 // Meeting status.
-define('zoomyt_meeting_EXPIRED', 0);
-define('zoomyt_meeting_EXISTS', 1);
+define('ZOOM_MEETING_EXPIRED', 0);
+define('ZOOM_MEETING_EXISTS', 1);
 
 // Number of meetings per page from zoom's get user report.
 define('ZOOM_DEFAULT_RECORDS_PER_CALL', 30);
@@ -60,7 +60,7 @@ define('ZOOM_MAX_RECORDS_PER_CALL', 300);
 define('ZOOM_USER_TYPE_BASIC', 1);
 define('ZOOM_USER_TYPE_PRO', 2);
 define('ZOOM_USER_TYPE_CORP', 3);
-define('zoomyt_meeting_NOT_FOUND_ERROR_CODE', 3001);
+define('ZOOM_MEETING_NOT_FOUND_ERROR_CODE', 3001);
 define('ZOOM_USER_NOT_FOUND_ERROR_CODE', 1001);
 define('ZOOM_INVALID_USER_ERROR_CODE', 1120);
 // Webinar options.

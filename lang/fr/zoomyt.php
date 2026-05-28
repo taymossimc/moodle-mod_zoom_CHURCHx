@@ -557,6 +557,22 @@ $string['video_status_uploading'] = 'Téléchargement vers YouTube';
 $string['video_status_uploaded'] = 'Disponible';
 $string['video_status_failed'] = 'Échec du téléchargement';
 $string['view_on_youtube'] = 'Voir sur YouTube';
+$string['video_status_deleted'] = 'Supprimée de YouTube';
+
+// Action de suppression sur YouTube.
+$string['delete_from_youtube'] = 'Supprimer de YT';
+$string['delete_from_youtube_confirm'] = 'Cette action supprimera définitivement la vidéo de YouTube. La session Zoom restera listée ci-dessous. Continuer ?';
+$string['delete_youtube_success'] = 'La vidéo a été supprimée de YouTube.';
+$string['delete_youtube_error'] = 'Impossible de supprimer la vidéo de YouTube : {$a}';
+
+// Action d\'ajout d\'une vidéo YouTube.
+$string['add_youtube_video'] = 'Ajouter une vidéo YouTube';
+$string['add_youtube_video_help'] = 'Collez l\'URL ou l\'identifiant d\'une vidéo YouTube. La vidéo sera ajoutée aux enregistrements de session et rendue visible aux étudiants.';
+$string['youtube_url'] = 'URL YouTube';
+$string['add_video_success'] = 'La vidéo YouTube a été ajoutée aux enregistrements de session.';
+$string['add_video_invalid_url'] = 'Cela ne ressemble pas à une URL ou un identifiant de vidéo YouTube valide.';
+$string['add_video_already_exists'] = 'Cette vidéo YouTube a déjà été ajoutée.';
+$string['manual_video_default_title'] = 'Vidéo YouTube';
 $string['session_date'] = 'Date de session';
 $string['video_duration'] = 'Durée';
 $string['toggle_video_visibility'] = 'Basculer la visibilité';

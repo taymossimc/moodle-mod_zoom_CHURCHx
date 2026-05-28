@@ -534,6 +534,84 @@ class youtube_service {
     }
 
     /**
+     * Delete a video from YouTube.
+     *
+     * Requires the youtube.force-ssl scope (already requested by this plugin).
+     * A 404 response is treated as success: the desired end state - the video no
+     * longer existing on YouTube - is already met.
+     *
+     * @param string $videoid YouTube video ID.
+     * @return bool True on success.
+     * @throws \moodle_exception On a non-recoverable API error.
+     */
+    public function delete_video(string $videoid): bool {
+        $token = $this->get_access_token();
+
+        $curl = new \curl();
+        $curl->setHeader('Authorization: Bearer ' . $token);
+
+        $url = self::API_URL . '/videos?id=' . urlencode($videoid);
+        $response = $curl->delete($url);
+
+        if ($curl->get_errno()) {
+            throw new \moodle_exception('youtube_api_error', 'zoomyt', '', $curl->error);
+        }
+
+        $info = $curl->get_info();
+        $httpcode = (int)($info['http_code'] ?? 0);
+
+        // 204 No Content is the documented success response; 404 means it is already gone.
+        if ($httpcode === 204 || $httpcode === 200 || $httpcode === 404) {
+            return true;
+        }
+
+        $message = 'HTTP ' . $httpcode;
+        if (!empty($response)) {
+            $result = json_decode($response);
+            if (isset($result->error->message)) {
+                $message = $result->error->message;
+            }
+        }
+
+        throw new \moodle_exception('youtube_api_error', 'zoomyt', '', $message);
+    }
+
+    /**
+     * Extract a YouTube video ID from a URL (or a bare ID).
+     *
+     * Supports watch?v=, youtu.be/, embed/, shorts/, live/ and /v/ forms with
+     * arbitrary extra query parameters, as well as a bare 11-character ID.
+     *
+     * @param string $url The YouTube URL or video ID.
+     * @return string|null The 11-character video ID, or null if not recognised.
+     */
+    public static function extract_video_id(string $url): ?string {
+        $url = trim($url);
+
+        // Bare 11-character ID.
+        if (preg_match('/^[A-Za-z0-9_-]{11}$/', $url)) {
+            return $url;
+        }
+
+        $patterns = [
+            '~youtu\.be/([A-Za-z0-9_-]{11})~',
+            '~youtube\.com/watch\?(?:.*&)?v=([A-Za-z0-9_-]{11})~',
+            '~youtube\.com/embed/([A-Za-z0-9_-]{11})~',
+            '~youtube\.com/shorts/([A-Za-z0-9_-]{11})~',
+            '~youtube\.com/live/([A-Za-z0-9_-]{11})~',
+            '~youtube\.com/v/([A-Za-z0-9_-]{11})~',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $url, $matches)) {
+                return $matches[1];
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Update video visibility.
      *
      * @param string $videoid YouTube video ID.

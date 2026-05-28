@@ -205,6 +205,7 @@ class video_gallery implements renderable, templatable {
                 FROM {zoomyt_videos} zyv
                 LEFT JOIN {zoomyt_meeting_recordings} zmr ON zmr.id = zyv.recordingid
                 WHERE zyv.zoomid = ?
+                  AND zyv.status <> 'deleted'
                 ORDER BY zyv.zoom_session_time DESC";
 
         $videos = $DB->get_records_sql($sql, [$zoomid]);

@@ -158,6 +158,137 @@ if ($action === 'syncyoutube') {
     redirect(new moodle_url('/mod/zoomyt/manage_recordings.php', ['id' => $id]));
 }
 
+// Handle delete-from-YouTube action. Deletes the video on YouTube but keeps the
+// Moodle record (marked as deleted) so the Zoom session stays listed and the
+// recording is not re-uploaded by the scheduled task.
+if ($action === 'deleteyoutube' && $videoid) {
+    require_sesskey();
+    require_once($CFG->dirroot . '/mod/zoomyt/classes/youtube_service.php');
+
+    $video = $DB->get_record('zoomyt_videos', ['id' => $videoid, 'zoomid' => $zoom->id], '*', MUST_EXIST);
+
+    $deleted = true;
+    if (!empty($video->youtube_video_id)) {
+        try {
+            $ytservice = \mod_zoomyt\youtube_service::get_instance_for_activity($zoom->id);
+            if ($ytservice && $ytservice->is_configured()) {
+                $ytservice->delete_video($video->youtube_video_id);
+            }
+        } catch (Exception $e) {
+            $deleted = false;
+            \core\notification::error(get_string('delete_youtube_error', 'zoomyt', $e->getMessage()));
+        }
+    }
+
+    if ($deleted) {
+        $update = new stdClass();
+        $update->id = $video->id;
+        $update->status = 'deleted';
+        $update->youtube_video_id = null;
+        $update->youtube_url = null;
+        $update->thumbnail_url = null;
+        $update->visible = 0;
+        $update->timemodified = time();
+        $DB->update_record('zoomyt_videos', $update);
+
+        \core\notification::success(get_string('delete_youtube_success', 'zoomyt'));
+    }
+
+    redirect(new moodle_url('/mod/zoomyt/manage_recordings.php', ['id' => $id]));
+}
+
+// Handle add-YouTube-video action. Adds an existing YouTube video to the session
+// recordings list (it does not upload to YouTube).
+if ($action === 'addyoutube') {
+    require_sesskey();
+    require_once($CFG->dirroot . '/mod/zoomyt/classes/youtube_service.php');
+
+    $rawurl = required_param('youtubeurl', PARAM_RAW);
+    $ytvideoid = \mod_zoomyt\youtube_service::extract_video_id($rawurl);
+
+    if (empty($ytvideoid)) {
+        \core\notification::error(get_string('add_video_invalid_url', 'zoomyt'));
+        redirect(new moodle_url('/mod/zoomyt/manage_recordings.php', ['id' => $id]));
+    }
+
+    // The youtube_video_id column is globally unique; avoid a duplicate insert.
+    if ($DB->record_exists('zoomyt_videos', ['youtube_video_id' => $ytvideoid])) {
+        \core\notification::warning(get_string('add_video_already_exists', 'zoomyt'));
+        redirect(new moodle_url('/mod/zoomyt/manage_recordings.php', ['id' => $id]));
+    }
+
+    $now = time();
+    $record = new stdClass();
+    $record->zoomid = $zoom->id;
+    $record->recordingid = null;
+    $record->meetinguuid = 'manual-' . uniqid();
+    $record->zoom_recording_id = null;
+    $record->youtube_video_id = $ytvideoid;
+    $record->youtube_url = 'https://www.youtube.com/watch?v=' . $ytvideoid;
+    $record->title = get_string('manual_video_default_title', 'zoomyt');
+    $record->description = '';
+    $record->thumbnail_url = 'https://img.youtube.com/vi/' . $ytvideoid . '/mqdefault.jpg';
+    $record->duration = 0;
+    $record->visibility = 'unlisted';
+    $record->status = 'uploaded';
+    $record->zoom_recording_deleted = 0;
+    $record->visible = 1; // Visible to students by default.
+    $record->zoom_session_time = $now;
+    $record->timecreated = $now;
+    $record->timemodified = $now;
+
+    // Enrich from YouTube where possible (title, description, thumbnail, etc.).
+    $ytservice = \mod_zoomyt\youtube_service::get_instance_for_activity($zoom->id);
+    $configured = $ytservice && $ytservice->is_configured();
+    if ($configured) {
+        try {
+            $info = $ytservice->get_video_info($ytvideoid);
+            if (!empty($info->title)) {
+                $record->title = $info->title;
+            }
+            $record->description = $info->description ?? '';
+            if (!empty($info->thumbnail_url)) {
+                $record->thumbnail_url = $info->thumbnail_url;
+            }
+            $record->duration = (int)($info->duration ?? 0);
+            if (!empty($info->visibility)) {
+                $record->visibility = $info->visibility;
+            }
+            if (!empty($info->published_at)) {
+                $publishedts = strtotime($info->published_at);
+                if ($publishedts) {
+                    $record->zoom_session_time = $publishedts;
+                }
+            }
+        } catch (Exception $e) {
+            debugging('Add YouTube video: could not fetch metadata: ' . $e->getMessage(), DEBUG_DEVELOPER);
+        }
+    }
+
+    $newid = $DB->insert_record('zoomyt_videos', $record);
+
+    // Best-effort: record available caption languages and download transcripts.
+    if ($configured) {
+        try {
+            $captions = $ytservice->get_video_captions($ytvideoid);
+            $languages = array_filter(array_column($captions, 'language'));
+            if (!empty($languages)) {
+                $DB->set_field('zoomyt_videos', 'caption_languages', implode(',', $languages), ['id' => $newid]);
+            }
+        } catch (Exception $e) {
+            debugging('Add YouTube video: could not fetch captions: ' . $e->getMessage(), DEBUG_DEVELOPER);
+        }
+        try {
+            $ytservice->download_and_store_transcripts($newid, $cm->id);
+        } catch (Exception $e) {
+            debugging('Add YouTube video: could not fetch transcripts: ' . $e->getMessage(), DEBUG_DEVELOPER);
+        }
+    }
+
+    \core\notification::success(get_string('add_video_success', 'zoomyt'));
+    redirect(new moodle_url('/mod/zoomyt/manage_recordings.php', ['id' => $id]));
+}
+
 // Get all videos for this activity.
 require_once($CFG->dirroot . '/mod/zoomyt/classes/output/video_gallery.php');
 $videos = \mod_zoomyt\output\video_gallery::get_all_videos_for_management($zoom->id, $cm->id);
@@ -222,9 +353,48 @@ echo html_writer::link($syncrecordingsurl,
 );
 echo html_writer::link($syncyoutubeurl,
     '<i class="fa fa-youtube-play"></i> ' . get_string('sync_youtube_button', 'zoomyt'),
-    ['class' => 'btn btn-outline-danger']
+    ['class' => 'btn btn-outline-danger mr-2']
+);
+echo html_writer::tag('button',
+    '<i class="fa fa-plus"></i> ' . get_string('add_youtube_video', 'zoomyt'),
+    [
+        'type' => 'button',
+        'class' => 'btn btn-outline-success',
+        'data-toggle' => 'modal',
+        'data-target' => '#addVideoModal',
+    ]
 );
 echo html_writer::end_div();
+
+// Add-YouTube-video modal (kept outside the videos block so it is always available).
+echo '
+<div class="modal fade" id="addVideoModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <form method="post" action="' . (new moodle_url('/mod/zoomyt/manage_recordings.php'))->out(false) . '">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">' . get_string('add_youtube_video', 'zoomyt') . '</h5>
+                    <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="id" value="' . $id . '">
+                    <input type="hidden" name="action" value="addyoutube">
+                    <input type="hidden" name="sesskey" value="' . sesskey() . '">
+                    <div class="form-group">
+                        <label for="add-youtube-url">' . get_string('youtube_url', 'zoomyt') . '</label>
+                        <input type="url" class="form-control" id="add-youtube-url" name="youtubeurl"
+                               placeholder="https://www.youtube.com/watch?v=..." required>
+                        <small class="form-text text-muted">' . get_string('add_youtube_video_help', 'zoomyt') . '</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">' . get_string('cancel') . '</button>
+                    <button type="submit" class="btn btn-success">' . get_string('add') . '</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>';
 
 // YouTube Videos Section.
 echo $OUTPUT->heading(get_string('session_recordings', 'zoomyt'), 3);
@@ -347,6 +517,18 @@ if (empty($videos)) {
                 'target' => '_blank',
                 'title' => get_string('view_on_youtube', 'zoomyt'),
                 'class' => 'btn btn-sm btn-outline-primary',
+            ]);
+
+            $deleteyturl = new moodle_url('/mod/zoomyt/manage_recordings.php', [
+                'id' => $id,
+                'action' => 'deleteyoutube',
+                'videoid' => $video->id,
+                'sesskey' => sesskey(),
+            ]);
+            $actions[] = html_writer::link($deleteyturl, '<i class="fa fa-trash"></i> ' . get_string('delete_from_youtube', 'zoomyt'), [
+                'title' => get_string('delete_from_youtube', 'zoomyt'),
+                'class' => 'btn btn-sm btn-outline-danger',
+                'onclick' => "return confirm('" . get_string('delete_from_youtube_confirm', 'zoomyt') . "');",
             ]);
         }
 

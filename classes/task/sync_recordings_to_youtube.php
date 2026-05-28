@@ -260,7 +260,7 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
                 JOIN {zoomyt_meeting_details} zmd ON zmd.uuid = zmr.meetinguuid
                 WHERE NOT EXISTS (
                     SELECT 1 FROM {zoomyt_videos} zyv
-                    WHERE zyv.recordingid = zmr.id AND zyv.status = 'uploaded'
+                    WHERE zyv.recordingid = zmr.id AND zyv.status IN ('uploaded', 'deleted')
                 )
                   AND (zmr.recordingtype IN ('active_speaker', 'shared_screen_with_speaker_view', 
                                              'shared_screen_with_gallery_view', 'gallery_view')

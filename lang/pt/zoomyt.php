@@ -621,6 +621,9 @@ $string['download_failed'] = 'Falha no download: {$a}';
 $string['task_sync_recordings_youtube'] = 'Sincronizar gravações Zoom com o YouTube';
 $string['task_sync_alternative_hosts'] = 'Sincronizar instrutores do curso como anfitriões alternativos';
 $string['task_retry_transcript_downloads'] = 'Tentar novamente download de transcrições do YouTube';
+$string['task_fetch_recordings_adhoc'] = 'Obter gravações Zoom (acionado por webhook)';
+$string['task_sync_youtube_adhoc'] = 'Sincronizar gravações Zoom com o YouTube (acionado por webhook)';
+$string['task_fetch_reports_adhoc'] = 'Obter relatórios de reuniões Zoom (acionado por webhook)';
 
 // Events.
 $string['event_video_uploaded'] = 'Vídeo enviado ao YouTube';

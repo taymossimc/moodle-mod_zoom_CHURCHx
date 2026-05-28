@@ -539,6 +539,9 @@ $string['download_failed'] = 'Échec du téléchargement : {$a}';
 $string['task_sync_recordings_youtube'] = 'Synchroniser les enregistrements Zoom vers YouTube';
 $string['task_sync_alternative_hosts'] = 'Synchroniser les enseignants comme hôtes alternatifs';
 $string['task_retry_transcript_downloads'] = 'Réessayer le téléchargement des transcriptions depuis YouTube';
+$string['task_fetch_recordings_adhoc'] = 'Récupérer les enregistrements Zoom (déclenché par webhook)';
+$string['task_sync_youtube_adhoc'] = 'Synchroniser les enregistrements Zoom vers YouTube (déclenché par webhook)';
+$string['task_fetch_reports_adhoc'] = 'Récupérer les rapports de réunion Zoom (déclenché par webhook)';
 
 // Événements.
 $string['event_video_uploaded'] = 'Vidéo téléchargée sur YouTube';
@@ -743,3 +746,48 @@ $string['sign_lang_korean'] = 'Langue des signes coréenne';
 $string['sign_lang_portuguese'] = 'Langue des signes portugaise';
 $string['sign_lang_russian'] = 'Langue des signes russe';
 $string['sign_lang_spanish'] = 'Langue des signes espagnole';
+
+// Chaînes ajoutées pour compléter le pack par rapport à l'anglais.
+$string['displayleadtime_nohideif'] = 'Veuillez noter : ce réglage n\'est traité que si le réglage « {$a} » a une valeur supérieure à zéro.';
+$string['err_start_time_past_recurring'] = 'Pour les réunions récurrentes, la partie date de ce champ correspond à la première date possible pour la prochaine réunion. Cette date doit être aujourd\'hui ou dans le futur.';
+$string['gradingmessagebody'] = 'Pour la session de réunion Zoom : {$a->zoomurl};
+<br>
+Nombre d\'utilisateurs notés automatiquement selon leur durée de présence à la réunion : {$a->graded}.
+<br>
+Nombre d\'utilisateurs déjà notés : {$a->alreadygraded}.
+<br>
+{$a->needgrade}<br>
+Consultez ou mettez à jour les notes des utilisateurs ici : {$a->gradeurl}
+<br>
+{$a->notfound}
+<br>
+{$a->notenrolled}';
+$string['gradingmessagesubject'] = 'Notes des utilisateurs pour la réunion Zoom : {$a->name}';
+$string['gradingsmallmeassage'] = 'Rapport rapide des notes des utilisateurs pour {$a->name} :
+<br>
+Notation manuelle requise : {$a->number}
+<br>
+Utilisateurs notés : {$a->graded + $a->alreadygraded}';
+$string['invitationregex_nohideif'] = 'Veuillez noter : les motifs regex ne seront utilisés que si le réglage « {$a} » est activé.';
+$string['privacy:metadata:zoom_breakout_participants'] = 'La table de base de données qui stocke la liste des participants aux salles de sous-commission des réunions Zoom';
+$string['privacy:metadata:zoom_breakout_participants:userid'] = 'L\'identifiant de l\'utilisateur participant';
+$string['privacy:metadata:zoom_meeting_view'] = 'La table de base de données qui suit les utilisateurs qui consultent les enregistrements de réunion';
+$string['privacy:metadata:zoom_meeting_view:userid'] = 'L\'identifiant de l\'utilisateur ayant consulté l\'enregistrement';
+$string['recordingtype_audio_interpretation'] = 'Interprétation audio';
+$string['recordingtype_audio_transcript'] = 'Transcription audio';
+$string['recordingtype_closed_caption'] = 'Sous-titres codés';
+$string['recordingtype_poll'] = 'Sondage';
+$string['recordingtype_production_studio'] = 'Studio de production';
+$string['recordingtype_shared_gallery'] = 'Partage d\'écran avec vue galerie';
+$string['recordingtype_shared_speaker_cc'] = 'Partage d\'écran avec vue intervenant (CC)';
+$string['recordingtype_sign'] = 'Interprétation en langue des signes';
+$string['recordingtype_summary'] = 'Résumé';
+$string['recordingtype_summary_next_steps'] = 'Résumé – Prochaines étapes';
+$string['recordingtype_summary_smart_chapters'] = 'Résumé – Chapitres intelligents';
+$string['recordingtype_timeline'] = 'Chronologie';
+$string['sendicalnotifications_warning'] = 'Les pièces jointes doivent être activées dans Administration du site / Serveur / E-mail / Configuration des messages sortants pour utiliser cette option.';
+$string['trackingfields_recommendedvalues'] = 'Valeurs recommandées : ';
+$string['youtube_client_id_desc'] = 'L\'identifiant client OAuth 2.0 de votre projet Google Cloud Console. Il est utilisé par défaut sur l\'ensemble du site pour l\'intégration YouTube.';
+$string['youtube_client_secret_desc'] = 'Le secret client OAuth 2.0 de votre projet Google Cloud Console. Il est utilisé par défaut sur l\'ensemble du site pour l\'intégration YouTube.';
+$string['zoomerr_scopes'] = 'La configuration OAuth de Zoom ne dispose pas des portées requises suivantes : {$a}';
+$string['zoomerr_viewrecordings_off'] = 'La consultation des enregistrements est désactivée, la tâche ne peut pas s\'exécuter';

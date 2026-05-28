@@ -50,10 +50,14 @@ try {
     header('Content-Type: application/json');
     echo json_encode($result['body']);
     
-} catch (Exception $e) {
-    // Log the error.
+} catch (\Throwable $e) {
+    // Catch Throwable (not just Exception) so PHP 8 Errors - e.g. a bad task
+    // queue call - return a clean JSON 500 and get logged, rather than emitting
+    // an uncaught fatal to Zoom.
     debugging('Zoom webhook error: ' . $e->getMessage(), DEBUG_DEVELOPER);
-    
+    error_log('[ZoomYT Webhook] Unhandled error: ' . $e->getMessage() .
+        ' in ' . $e->getFile() . ':' . $e->getLine());
+
     http_response_code(500);
     header('Content-Type: application/json');
     echo json_encode(['error' => 'Internal server error']);

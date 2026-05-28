@@ -201,7 +201,7 @@ class webhook_handler {
      * @return array Response.
      */
     private function handle_meeting_ended(object $payload): array {
-        global $CFG, $DB;
+        global $DB;
 
         $meetingid = $payload->payload->object->id ?? null;
         $uuid = $payload->payload->object->uuid ?? null;
@@ -239,10 +239,9 @@ class webhook_handler {
         }
 
         // Queue the report fetch task to run immediately.
-        // We use an ad-hoc task to avoid blocking the webhook response.
-        require_once($CFG->dirroot . '/mod/zoomyt/classes/task/get_meeting_reports.php');
-        
-        $task = new \mod_zoomyt\task\get_meeting_reports();
+        // We use a dedicated ad-hoc task (the periodic task is a scheduled_task and
+        // cannot be queued ad-hoc) to avoid blocking the webhook response.
+        $task = new \mod_zoomyt\task\fetch_reports_adhoc();
         $task->set_custom_data(['instance_id' => $zoom->id, 'triggered_by' => 'webhook']);
         \core\task\manager::queue_adhoc_task($task, true); // true = run if duplicate exists
 
@@ -260,7 +259,7 @@ class webhook_handler {
      * @return array Response.
      */
     private function handle_recording_completed(object $payload): array {
-        global $CFG, $DB;
+        global $DB;
 
         $meetingid = $payload->payload->object->id ?? null;
         $uuid = $payload->payload->object->uuid ?? null;
@@ -297,10 +296,9 @@ class webhook_handler {
             ])->trigger();
         }
 
-        // Queue the recording fetch task.
-        require_once($CFG->dirroot . '/mod/zoomyt/classes/task/get_meeting_recordings.php');
-        
-        $task = new \mod_zoomyt\task\get_meeting_recordings();
+        // Queue the recording fetch task. We use dedicated ad-hoc tasks because the
+        // periodic tasks are scheduled_tasks and cannot be queued ad-hoc.
+        $task = new \mod_zoomyt\task\fetch_recordings_adhoc();
         $task->set_custom_data(['instance_id' => $zoom->id, 'triggered_by' => 'webhook']);
         \core\task\manager::queue_adhoc_task($task, true);
 
@@ -308,9 +306,7 @@ class webhook_handler {
 
         // Also queue YouTube sync task to run after recording fetch completes.
         // Add a 2-minute delay to ensure recording metadata is fetched first.
-        require_once($CFG->dirroot . '/mod/zoomyt/classes/task/sync_recordings_to_youtube.php');
-        
-        $yttask = new \mod_zoomyt\task\sync_recordings_to_youtube();
+        $yttask = new \mod_zoomyt\task\sync_youtube_adhoc();
         $yttask->set_custom_data(['instance_id' => $zoom->id, 'triggered_by' => 'webhook']);
         $yttask->set_next_run_time(time() + 120); // Run in 2 minutes.
         \core\task\manager::queue_adhoc_task($yttask, true);

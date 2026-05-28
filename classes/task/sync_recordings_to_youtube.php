@@ -49,8 +49,14 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
      * Execute the task.
      */
     public function execute() {
-        // Check for custom data (when run as adhoc task from webhook).
-        $customdata = $this->get_custom_data();
+        // get_custom_data() is only available on adhoc_task, not scheduled_task.
+        // This class is registered as a scheduled task (db/tasks.php), so guard the
+        // call to avoid a fatal "undefined method" error on PHP 8 during cron runs.
+        $customdata = null;
+        if (method_exists($this, 'get_custom_data')) {
+            $customdata = $this->get_custom_data();
+        }
+
         if (!empty($customdata->instance_id)) {
             mtrace('YouTube sync triggered by webhook for instance: ' . $customdata->instance_id);
             $this->execute_for_instance((int)$customdata->instance_id);

@@ -539,6 +539,9 @@ $string['download_failed'] = 'Error en la descarga: {$a}';
 $string['task_sync_recordings_youtube'] = 'Sincronizar grabaciones de Zoom a YouTube';
 $string['task_sync_alternative_hosts'] = 'Sincronizar instructores del curso como anfitriones alternativos';
 $string['task_retry_transcript_downloads'] = 'Reintentar la descarga de transcripciones desde YouTube';
+$string['task_fetch_recordings_adhoc'] = 'Obtener grabaciones de Zoom (activado por webhook)';
+$string['task_sync_youtube_adhoc'] = 'Sincronizar grabaciones de Zoom a YouTube (activado por webhook)';
+$string['task_fetch_reports_adhoc'] = 'Obtener informes de reuniones de Zoom (activado por webhook)';
 
 // Eventos.
 $string['event_video_uploaded'] = 'Video cargado a YouTube';
@@ -743,3 +746,48 @@ $string['sign_lang_korean'] = 'Lengua de signos coreana';
 $string['sign_lang_portuguese'] = 'Lengua de signos portuguesa';
 $string['sign_lang_russian'] = 'Lengua de signos rusa';
 $string['sign_lang_spanish'] = 'Lengua de signos española';
+
+// Cadenas añadidas para completar el paquete respecto al inglés.
+$string['displayleadtime_nohideif'] = 'Tenga en cuenta: este ajuste solo se procesa si el ajuste «{$a}» tiene un valor mayor que cero.';
+$string['err_start_time_past_recurring'] = 'Para reuniones recurrentes, la parte de fecha de este campo es la fecha más temprana posible para la próxima reunión. Esta fecha debe ser hoy o en el futuro.';
+$string['gradingmessagebody'] = 'Para la sesión de reunión de Zoom: {$a->zoomurl};
+<br>
+Número de usuarios calificados automáticamente según su duración en la reunión: {$a->graded}.
+<br>
+Número de usuarios que ya estaban calificados: {$a->alreadygraded}.
+<br>
+{$a->needgrade}<br>
+Revise o actualice las calificaciones de los usuarios aquí: {$a->gradeurl}
+<br>
+{$a->notfound}
+<br>
+{$a->notenrolled}';
+$string['gradingmessagesubject'] = 'Calificaciones de usuarios para la reunión de Zoom: {$a->name}';
+$string['gradingsmallmeassage'] = 'Informe rápido de calificaciones de usuarios para {$a->name}:
+<br>
+Requiere calificación manual: {$a->number}
+<br>
+Usuarios calificados: {$a->graded + $a->alreadygraded}';
+$string['invitationregex_nohideif'] = 'Tenga en cuenta: los patrones de expresión regular solo se usarán si el ajuste «{$a}» está activado.';
+$string['privacy:metadata:zoom_breakout_participants'] = 'La tabla de la base de datos que almacena la lista de participantes de las salas de grupos de las reuniones de Zoom';
+$string['privacy:metadata:zoom_breakout_participants:userid'] = 'El id del usuario participante';
+$string['privacy:metadata:zoom_meeting_view'] = 'La tabla de la base de datos para registrar los usuarios que ven las grabaciones de la reunión';
+$string['privacy:metadata:zoom_meeting_view:userid'] = 'El id del usuario que vio la grabación';
+$string['recordingtype_audio_interpretation'] = 'Interpretación de audio';
+$string['recordingtype_audio_transcript'] = 'Transcripción de audio';
+$string['recordingtype_closed_caption'] = 'Subtítulos';
+$string['recordingtype_poll'] = 'Encuesta';
+$string['recordingtype_production_studio'] = 'Estudio de producción';
+$string['recordingtype_shared_gallery'] = 'Pantalla compartida con vista de galería';
+$string['recordingtype_shared_speaker_cc'] = 'Pantalla compartida con vista de orador (CC)';
+$string['recordingtype_sign'] = 'Interpretación en lengua de signos';
+$string['recordingtype_summary'] = 'Resumen';
+$string['recordingtype_summary_next_steps'] = 'Resumen: próximos pasos';
+$string['recordingtype_summary_smart_chapters'] = 'Resumen: capítulos inteligentes';
+$string['recordingtype_timeline'] = 'Cronología';
+$string['sendicalnotifications_warning'] = 'Los archivos adjuntos deben estar habilitados en Administración del sitio / Servidor / Correo electrónico / Configuración de correo saliente para usar esta opción.';
+$string['trackingfields_recommendedvalues'] = 'Valores recomendados: ';
+$string['youtube_client_id_desc'] = 'El ID de cliente de OAuth 2.0 de su proyecto de Google Cloud Console. Se usa en todo el sitio como valor predeterminado para la integración con YouTube.';
+$string['youtube_client_secret_desc'] = 'El secreto de cliente de OAuth 2.0 de su proyecto de Google Cloud Console. Se usa en todo el sitio como valor predeterminado para la integración con YouTube.';
+$string['zoomerr_scopes'] = 'La configuración de OAuth de Zoom no tiene los siguientes permisos (scopes) requeridos: {$a}';
+$string['zoomerr_viewrecordings_off'] = 'La visualización de grabaciones está desactivada, la tarea no puede ejecutarse';

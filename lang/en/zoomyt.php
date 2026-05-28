@@ -622,6 +622,11 @@ $string['task_sync_recordings_youtube'] = 'Sync Zoom recordings to YouTube';
 $string['task_sync_alternative_hosts'] = 'Sync course instructors as alternative hosts';
 $string['task_retry_transcript_downloads'] = 'Retry downloading transcripts from YouTube';
 
+// Ad-hoc tasks (queued by the Zoom webhook for immediate processing).
+$string['task_fetch_recordings_adhoc'] = 'Fetch Zoom recordings (webhook-triggered)';
+$string['task_sync_youtube_adhoc'] = 'Sync Zoom recordings to YouTube (webhook-triggered)';
+$string['task_fetch_reports_adhoc'] = 'Fetch Zoom meeting reports (webhook-triggered)';
+
 // Events.
 $string['event_video_uploaded'] = 'Video uploaded to YouTube';
 $string['event_video_viewed'] = 'Video viewed';

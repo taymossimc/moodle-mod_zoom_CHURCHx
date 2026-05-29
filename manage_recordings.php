@@ -397,7 +397,7 @@ echo '
 </div>';
 
 // YouTube Videos Section.
-echo $OUTPUT->heading(get_string('session_recordings', 'zoomyt'), 3);
+echo $OUTPUT->heading(get_string('sessions_uploaded_youtube', 'zoomyt'), 3);
 
 if (empty($videos)) {
     echo html_writer::tag('p', get_string('no_videos', 'zoomyt'), ['class' => 'alert alert-info']);
@@ -407,6 +407,7 @@ if (empty($videos)) {
         get_string('name'),
         get_string('description'),
         get_string('session_date', 'zoomyt'),
+        get_string('duration', 'zoomyt'),
         get_string('youtube_status', 'zoomyt'),
         get_string('transcript', 'zoomyt'),
         get_string('visibility', 'zoomyt'),
@@ -578,6 +579,7 @@ if (empty($videos)) {
             new html_table_cell($titlecell),
             new html_table_cell($descriptioncell),
             $video->session_date,
+            new html_table_cell($video->duration),
             new html_table_cell($statuscell),
             new html_table_cell($transcriptcell),
             new html_table_cell($visiblecell),

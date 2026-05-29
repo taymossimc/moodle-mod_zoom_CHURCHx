@@ -155,14 +155,29 @@ class get_meeting_reports extends scheduled_task {
             'report:read:list_users:admin',
         ];
 
-        // Can only query on $hostuuids using Report API.
+        // Prefer the Dashboard API (can list all account meetings), but fall back to
+        // the Report API when the account is not entitled to Dashboard (it requires a
+        // Business+/ZMP plan with Dashboard enabled). Without this fallback the whole
+        // task aborts on a bad_request and no zoomyt_meeting_details rows are created,
+        // which in turn blocks recordings from being synced to YouTube.
+        // Note: $hostuuids can only be queried via the Report API.
+        $allmeetings = null;
         if (empty($hostuuids) && $this->service->has_scope($dashboardscopes)) {
-            $allmeetings = $this->get_meetings_via_dashboard($start, $end);
-        } else if ($this->service->has_scope($reportscopes)) {
-            $allmeetings = $this->get_meetings_via_reports($start, $end, $hostuuids);
-        } else {
-            mtrace('Skipping task - missing OAuth scopes required for reports');
-            return;
+            try {
+                $allmeetings = $this->get_meetings_via_dashboard($start, $end);
+            } catch (\mod_zoomyt\bad_request_exception $e) {
+                mtrace('Dashboard API unavailable for this account (' . $e->getMessage() .
+                    '); falling back to Report API.');
+            }
+        }
+
+        if ($allmeetings === null) {
+            if ($this->service->has_scope($reportscopes)) {
+                $allmeetings = $this->get_meetings_via_reports($start, $end, $hostuuids);
+            } else {
+                mtrace('Skipping task - missing OAuth scopes required for reports');
+                return;
+            }
         }
 
         // Sort all meetings based on end_time so that we know where to pick

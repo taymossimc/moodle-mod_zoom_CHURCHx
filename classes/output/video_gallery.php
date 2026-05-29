@@ -95,7 +95,7 @@ class video_gallery implements renderable, templatable {
             $item->youtube_video_id = $video->youtube_video_id;
             $item->youtube_url = $video->youtube_url;
             $item->thumbnail_url = $video->thumbnail_url ?: $this->get_default_thumbnail($video->youtube_video_id);
-            $item->duration = $this->format_duration($video->duration);
+            $item->duration = self::format_duration($video->duration);
             $item->session_date = userdate($video->zoom_session_time, get_string('strftimedatetime'));
             $item->visible = (bool)$video->visible;
             $item->status = $video->status;
@@ -142,7 +142,7 @@ class video_gallery implements renderable, templatable {
      * @param int|null $seconds Duration in seconds.
      * @return string Formatted duration.
      */
-    protected function format_duration($seconds): string {
+    public static function format_duration($seconds): string {
         $seconds = (int)$seconds;
 
         if ($seconds <= 0) {
@@ -221,6 +221,8 @@ class video_gallery implements renderable, templatable {
             $item->thumbnail_url = $video->thumbnail_url;
             $item->status = $video->status;
             $item->status_label = get_string('video_status_' . $video->status, 'zoomyt');
+            $item->duration_seconds = (int)$video->duration;
+            $item->duration = self::format_duration($video->duration);
             $item->error_message = $video->error_message;
             $item->visible = (bool)$video->visible;
             $item->visibility = $video->visibility ?? 'unlisted';

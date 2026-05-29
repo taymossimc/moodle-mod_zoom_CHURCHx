@@ -590,6 +590,7 @@ $string['edit_video'] = 'Editar video';
 $string['title'] = 'Título';
 $string['captions_available'] = 'Subtítulos disponibles';
 $string['session_recordings'] = 'Grabaciones de sesión';
+$string['sessions_uploaded_youtube'] = 'Sesiones subidas a YouTube';
 $string['next_meeting'] = 'Próxima reunión: {$a}';
 $string['view_recorded_sessions'] = 'Ver sesiones grabadas';
 $string['no_scheduled_meetings'] = 'Sin reuniones programadas';

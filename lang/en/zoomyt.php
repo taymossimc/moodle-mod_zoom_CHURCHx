@@ -674,6 +674,7 @@ $string['edit_video'] = 'Edit video';
 $string['title'] = 'Title';
 $string['captions_available'] = 'Captions available';
 $string['session_recordings'] = 'Session Recordings';
+$string['sessions_uploaded_youtube'] = 'Sessions Uploaded to YouTube';
 $string['next_meeting'] = 'Next Meeting: {$a}';
 $string['view_recorded_sessions'] = 'View Recorded Sessions';
 $string['no_scheduled_meetings'] = 'No scheduled meetings';

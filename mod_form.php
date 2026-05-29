@@ -1238,6 +1238,7 @@ class mod_zoomyt_mod_form extends moodleform_mod {
             $json = [];
             foreach ($rows as $r) {
                 $json[] = [
+                    'id' => (int) $r->id,
                     'start_time' => (int) $r->start_time,
                     'duration' => (int) $r->duration,
                 ];

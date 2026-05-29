@@ -43,10 +43,17 @@ define(['jquery'], function($) {
         if (isNaN(t)) {
             return null;
         }
-        return {
+        var row = {
             start_time: Math.floor(t / 1000),
             duration: duration
         };
+        // Preserve the stored occurrence id so the server can match an edited
+        // session to its existing Zoom meeting (in-place update vs create).
+        var id = parseInt($tr.attr('data-occ-id'), 10);
+        if (id) {
+            row.id = id;
+        }
+        return row;
     }
 
     /**
@@ -76,6 +83,9 @@ define(['jquery'], function($) {
         }
         var dur = (data && data.duration) ? data.duration : 60;
         var $tr = $('<tr></tr>');
+        if (data && data.id) {
+            $tr.attr('data-occ-id', data.id);
+        }
         $tr.append(
             '<td style="width: 290px;"><label class="accesshide">' + labels.when + '</label>' +
             '<input type="datetime-local" class="form-control zoomyt-cd-time" ' +

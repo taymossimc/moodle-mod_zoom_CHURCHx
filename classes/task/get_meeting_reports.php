@@ -600,8 +600,9 @@ class get_meeting_reports extends scheduled_task {
         ));
 
         // If meeting doesn't exist in the zoom database, the instance is
-        // deleted, and we don't need reports for these.
-        if (!($zoomrecord = $DB->get_record('zoomyt', ['meeting_id' => $meeting->meeting_id], '*', IGNORE_MULTIPLE))) {
+        // deleted, and we don't need reports for these. Custom-dates activities
+        // store each session as a separate Zoom meeting, so resolve via the helper.
+        if (!($zoomrecord = \zoomyt_get_instance_by_zoom_meetingid($meeting->meeting_id))) {
             mtrace('Meeting does not exist locally; skipping');
             return true;
         }

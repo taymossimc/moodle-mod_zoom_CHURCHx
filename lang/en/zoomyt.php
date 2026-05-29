@@ -763,11 +763,14 @@ $string['retry_upload_error'] = 'YouTube upload retry failed: {$a}';
 
 // Custom recurrence & interpretation (v2.6.16+).
 $string['recurrence_option_custom'] = 'Custom dates (session list)';
-$string['customdates_help'] = 'List each session below with date/time and duration (minutes). Zoom provides one meeting link for all sessions; Moodle stores the schedule and adds calendar entries.';
+$string['customdates_help'] = 'List each session below with date/time and duration (minutes). A separate Zoom meeting is created for each session; the activity shows a single Join button that opens the current or next session.';
 $string['customdates_add'] = 'Add session';
 $string['customdates_remove'] = 'Remove';
 $string['customdates_sessions'] = 'Scheduled sessions';
+$string['customdates_next_session'] = 'Next';
 $string['customdates_timezone'] = 'Times entered below are in your account timezone: {$a}';
+$string['custom_sync_summary'] = 'Sessions synced with Zoom: {$a->created} created, {$a->updated} updated, {$a->deleted} removed.';
+$string['custom_sync_errors'] = 'Some sessions could not be synced with Zoom ({$a}):';
 $string['err_customdates_required'] = 'Add at least one session for custom recurrence.';
 $string['err_customdates_past'] = 'When creating the activity, each session must start today or later.';
 $string['interpretation'] = 'Interpretation';

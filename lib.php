@@ -138,54 +138,79 @@ function zoomyt_add_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = null)
         debugging("ZOOMYT: Auto-added instructors as alternative hosts: {$zoom->alternative_hosts}", DEBUG_DEVELOPER);
     }
 
-    try {
-        $response = zoomyt_create_meeting_with_alt_host_retry($zoom);
-    } catch (moodle_exception $e) {
-        // If meeting creation failed, try with the fallback host account.
-        $fallbackid = zoomyt_get_fallback_host_id();
-        if ($fallbackid && $zoom->host_id !== $fallbackid) {
-            zoomyt_provision_log('create_fallback_retry', 'ok',
-                'Meeting creation failed, retrying with fallback host: ' . $e->getMessage(),
-                null, null, $zoom->course);
-            $zoom->host_id = $fallbackid;
-            $response = zoomyt_create_meeting_with_alt_host_retry($zoom);
-        } else {
-            throw $e;
+    $iscustom = !empty($zoom->recurring) && ($zoom->recurrence_type ?? null) == ZOOM_RECURRINGTYPE_CUSTOM
+        && !empty($customoccurrences);
+    $response = null;
+
+    if ($iscustom) {
+        // Custom dates: create one fixed-time scheduled Zoom meeting per session.
+        // Insert the activity row first (with placeholder representative fields), then
+        // create a meeting per session and copy the active session onto the row.
+        zoomyt_webservice()->provide_license($zoom->host_id);
+
+        $zoom->meeting_id = 0;
+        $zoom->join_url = '';
+        if (empty($zoom->timezone)) {
+            $zoom->timezone = !empty($CFG->timezone) ? $CFG->timezone : date_default_timezone_get();
         }
-    }
-    $zoom = populate_zoomyt_from_response($zoom, $response);
-    $zoom->timemodified = time();
-    if (!empty($zoom->schedule_for)) {
-        // Wait until after receiving a successful response from zoom to update the host
-        // based on the schedule_for field. Zoom handles the schedule for on their
-        // end, but returns the host as the person who created the meeting, not the person
-        // that it was scheduled for.
-        $correcthostzoomuser = zoomyt_get_user($zoom->schedule_for);
-        $zoom->host_id = $correcthostzoomuser->id;
+        if (!isset($zoom->created_at)) {
+            $zoom->created_at = gmdate('Y-m-d\TH:i:s\Z');
+        }
+        $zoom->timemodified = time();
+
+        $zoom->id = $DB->insert_record('zoomyt', $zoom);
+
+        $syncresult = zoomyt_sync_custom_occurrence_meetings($zoom, $customoccurrences);
+        zoomyt_apply_custom_representative($zoom);
+        zoomyt_notify_custom_sync_result($syncresult);
+    } else {
+        try {
+            $response = zoomyt_create_meeting_with_alt_host_retry($zoom);
+        } catch (moodle_exception $e) {
+            // If meeting creation failed, try with the fallback host account.
+            $fallbackid = zoomyt_get_fallback_host_id();
+            if ($fallbackid && $zoom->host_id !== $fallbackid) {
+                zoomyt_provision_log('create_fallback_retry', 'ok',
+                    'Meeting creation failed, retrying with fallback host: ' . $e->getMessage(),
+                    null, null, $zoom->course);
+                $zoom->host_id = $fallbackid;
+                $response = zoomyt_create_meeting_with_alt_host_retry($zoom);
+            } else {
+                throw $e;
+            }
+        }
+        $zoom = populate_zoomyt_from_response($zoom, $response);
+        $zoom->timemodified = time();
+        if (!empty($zoom->schedule_for)) {
+            // Wait until after receiving a successful response from zoom to update the host
+            // based on the schedule_for field. Zoom handles the schedule for on their
+            // end, but returns the host as the person who created the meeting, not the person
+            // that it was scheduled for.
+            $correcthostzoomuser = zoomyt_get_user($zoom->schedule_for);
+            $zoom->host_id = $correcthostzoomuser->id;
+        }
+
+        if (isset($zoom->recurring) && isset($response->occurrences) && empty($response->occurrences) &&
+                ($zoom->recurrence_type ?? null) != ZOOM_RECURRINGTYPE_CUSTOM) {
+            // Recurring meetings did not create any occurrencces.
+            // This means invalid options selected.
+            // Need to rollback created meeting.
+            zoomyt_webservice()->delete_meeting($zoom->meeting_id, $zoom->webinar);
+
+            $redirecturl = new moodle_url('/course/view.php', ['id' => $zoom->course]);
+            throw new moodle_exception('erroraddinstance', 'zoomyt', $redirecturl->out());
+        }
+
+        $zoom->id = $DB->insert_record('zoomyt', $zoom);
     }
 
-    if (isset($zoom->recurring) && isset($response->occurrences) && empty($response->occurrences) &&
-            ($zoom->recurrence_type ?? null) != ZOOM_RECURRINGTYPE_CUSTOM) {
-        // Recurring meetings did not create any occurrencces.
-        // This means invalid options selected.
-        // Need to rollback created meeting.
-        zoomyt_webservice()->delete_meeting($zoom->meeting_id, $zoom->webinar);
-
-        $redirecturl = new moodle_url('/course/view.php', ['id' => $zoom->course]);
-        throw new moodle_exception('erroraddinstance', 'zoomyt', $redirecturl->out());
-    }
-
-    $zoom->id = $DB->insert_record('zoomyt', $zoom);
-    if ($zoom->recurring && ($zoom->recurrence_type ?? null) == ZOOM_RECURRINGTYPE_CUSTOM && !empty($customoccurrences)) {
-        zoomyt_save_custom_occurrences($zoom->id, $customoccurrences);
-    }
     if (!empty($zoom->breakoutrooms)) {
         // We ignore the API response and save the local data for breakout rooms to support dynamic users and groups.
         zoomyt_insert_instance_breakout_rooms($zoom->id, $breakoutrooms['db']);
     }
 
     // Store tracking field data for meeting.
-    zoomyt_sync_meeting_tracking_fields($zoom->id, $response->tracking_fields ?? []);
+    zoomyt_sync_meeting_tracking_fields($zoom->id, ($response !== null ? ($response->tracking_fields ?? []) : []));
 
     zoomyt_calendar_item_update($zoom);
     zoomyt_grade_item_update($zoom);
@@ -302,36 +327,54 @@ function zoomyt_update_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = nu
         debugging("ZOOMYT: Auto-updated instructors as alternative hosts: {$zoom->alternative_hosts}", DEBUG_DEVELOPER);
     }
 
-    // Update meeting on Zoom, retrying without problematic alt hosts if needed.
-    try {
-        zoomyt_update_meeting_with_alt_host_retry($zoom);
-        if (!empty($zoom->schedule_for)) {
-            // Only update this if we actually get a valid user.
-            if ($correcthostzoomuser = zoomyt_get_user($zoom->schedule_for)) {
-                $zoom->host_id = $correcthostzoomuser->id;
-                $DB->update_record('zoomyt', $zoom);
+    $iscustom = !empty($zoom->recurring) && ($zoom->recurrence_type ?? null) == ZOOM_RECURRINGTYPE_CUSTOM;
+
+    if ($iscustom) {
+        // Custom dates: reconcile one scheduled Zoom meeting per session - create
+        // added sessions, update moved/resized ones, delete removed ones - instead
+        // of a single recurring-meeting PATCH.
+        try {
+            $syncresult = zoomyt_sync_custom_occurrence_meetings($zoom, $customoccurrences);
+        } catch (moodle_exception $error) {
+            if (isset($mform)) {
+                throw $error;
+            } else {
+                return false;
             }
         }
-    } catch (moodle_exception $error) {
-        if (isset($mform)) {
-            throw $error;
-        } else {
-            return false;
+        zoomyt_apply_custom_representative($zoom);
+        zoomyt_notify_custom_sync_result($syncresult);
+        zoomyt_calendar_item_update($zoom);
+    } else {
+        // Update meeting on Zoom, retrying without problematic alt hosts if needed.
+        try {
+            zoomyt_update_meeting_with_alt_host_retry($zoom);
+            if (!empty($zoom->schedule_for)) {
+                // Only update this if we actually get a valid user.
+                if ($correcthostzoomuser = zoomyt_get_user($zoom->schedule_for)) {
+                    $zoom->host_id = $correcthostzoomuser->id;
+                    $DB->update_record('zoomyt', $zoom);
+                }
+            }
+        } catch (moodle_exception $error) {
+            if (isset($mform)) {
+                throw $error;
+            } else {
+                return false;
+            }
         }
+
+        // Get the updated meeting info from zoom, before updating calendar events.
+        $response = zoomyt_webservice()->get_meeting_webinar_info($zoom->meeting_id, $zoom->webinar);
+        $zoom = populate_zoomyt_from_response($zoom, $response);
+        $DB->update_record('zoomyt', $zoom);
+
+        // Update tracking field data for meeting.
+        zoomyt_sync_meeting_tracking_fields($zoom->id, $response->tracking_fields ?? []);
+
+        zoomyt_calendar_item_update($zoom);
     }
 
-    // Get the updated meeting info from zoom, before updating calendar events.
-    $response = zoomyt_webservice()->get_meeting_webinar_info($zoom->meeting_id, $zoom->webinar);
-    $zoom = populate_zoomyt_from_response($zoom, $response);
-    $DB->update_record('zoomyt', $zoom);
-
-    // Update tracking field data for meeting.
-    zoomyt_sync_meeting_tracking_fields($zoom->id, $response->tracking_fields ?? []);
-
-    zoomyt_calendar_item_update($zoom);
-    if ($zoom->recurring && ($zoom->recurrence_type ?? null) == ZOOM_RECURRINGTYPE_CUSTOM) {
-        zoomyt_save_custom_occurrences($zoom->id, $customoccurrences);
-    }
     zoomyt_grade_item_update($zoom);
 
     // Log the meeting update event.
@@ -508,8 +551,25 @@ function zoomyt_delete_instance($id) {
         return true;
     }
 
-    // If the meeting is missing from zoom, don't bother with the webservice.
-    if ($zoom->exists_on_zoom == ZOOM_MEETING_EXISTS) {
+    $iscustom = !empty($zoom->recurring) && ($zoom->recurrence_type ?? null) == ZOOM_RECURRINGTYPE_CUSTOM;
+    if ($iscustom) {
+        // Custom dates: each session is its own Zoom meeting; delete them all.
+        $occurrences = $DB->get_records('zoomyt_custom_occurrences', ['zoomid' => $zoom->id]);
+        foreach ($occurrences as $occ) {
+            if (empty($occ->meeting_id) || empty($occ->exists_on_zoom)) {
+                continue;
+            }
+            try {
+                zoomyt_webservice()->delete_meeting($occ->meeting_id, $zoom->webinar);
+            } catch (\mod_zoomyt\not_found_exception $error) {
+                mtrace('Session meeting not on Zoom; continuing');
+            } catch (moodle_exception $error) {
+                // Don't block activity deletion if one session fails to delete.
+                mtrace('Could not delete session meeting ' . $occ->meeting_id . ': ' . $error->getMessage());
+            }
+        }
+    } else if ($zoom->exists_on_zoom == ZOOM_MEETING_EXISTS) {
+        // If the meeting is missing from zoom, don't bother with the webservice.
         try {
             zoomyt_webservice()->delete_meeting($zoom->meeting_id, $zoom->webinar);
         } catch (\mod_zoomyt\not_found_exception $error) {

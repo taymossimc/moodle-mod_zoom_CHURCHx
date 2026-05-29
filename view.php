@@ -34,6 +34,10 @@ require_login();
 // Additional access checks in zoomyt_get_instance_setup().
 [$course, $cm, $zoom] = zoomyt_get_instance_setup();
 
+// Custom dates: a single smart Join/Start button targets the active/next session,
+// so point this request's representative meeting at that session's Zoom meeting.
+$zoom = zoomyt_point_to_active_occurrence($zoom);
+
 $config = get_config('zoomyt');
 
 $context = context_module::instance($cm->id);
@@ -82,13 +86,21 @@ if ($zoom->exists_on_zoom == ZOOM_MEETING_EXPIRED) {
         $showrecreate = zoomyt_is_meeting_gone_error($error);
 
         if ($showrecreate) {
-            // Mark meeting as expired.
-            $updatedata = new stdClass();
-            $updatedata->id = $zoom->id;
-            $updatedata->exists_on_zoom = ZOOM_MEETING_EXPIRED;
-            $DB->update_record('zoomyt', $updatedata);
+            if (!empty($zoom->recurring) && (int) $zoom->recurrence_type === ZOOM_RECURRINGTYPE_CUSTOM) {
+                // Custom dates: only this session's meeting is gone; keep the activity
+                // (other sessions remain) and just flag this session locally.
+                $DB->set_field('zoomyt_custom_occurrences', 'exists_on_zoom', 0,
+                    ['meeting_id' => $zoom->meeting_id]);
+                $showrecreate = false;
+            } else {
+                // Mark meeting as expired.
+                $updatedata = new stdClass();
+                $updatedata->id = $zoom->id;
+                $updatedata->exists_on_zoom = ZOOM_MEETING_EXPIRED;
+                $DB->update_record('zoomyt', $updatedata);
 
-            $zoom->exists_on_zoom = ZOOM_MEETING_EXPIRED;
+                $zoom->exists_on_zoom = ZOOM_MEETING_EXPIRED;
+            }
         }
     } catch (moodle_exception $error) {
         // Ignore other exceptions.
@@ -344,9 +356,16 @@ if ($showschedule) {
     if ($zoom->recurring && (int) $zoom->recurrence_type === ZOOM_RECURRINGTYPE_CUSTOM) {
         $sessions = zoomyt_get_custom_occurrences($zoom->id);
         if (!empty($sessions)) {
+            $active = zoomyt_get_active_occurrence($zoom);
+            $activeid = $active ? (int) $active->id : 0;
             $list = html_writer::start_tag('ul', ['class' => 'mb-0']);
             foreach ($sessions as $s) {
                 $line = userdate($s->start_time) . ' — ' . format_time($s->duration * 60);
+                if ($activeid && (int) $s->id === $activeid) {
+                    $line .= ' ' . html_writer::tag('span',
+                        get_string('customdates_next_session', 'mod_zoomyt'),
+                        ['class' => 'badge badge-info']);
+                }
                 $list .= html_writer::tag('li', $line);
             }
             $list .= html_writer::end_tag('ul');

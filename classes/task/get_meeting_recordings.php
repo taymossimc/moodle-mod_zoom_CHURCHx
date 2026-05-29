@@ -147,15 +147,29 @@ class get_meeting_recordings extends scheduled_task {
             // - Meeting is within the early access window (could have started early)
             if ($instanceid !== null) {
                 // Manual sync - always include.
-                $hostmeetings[$zoom->host_id][$zoom->meeting_id] = $zoom;
+                $include = true;
                 mtrace('Processing meeting: ' . $zoom->name . ' (ID: ' . $zoom->meeting_id . ')');
             } else {
                 $starttime = intval($zoom->start_time);
                 // Check if meeting could have started (now is past start_time OR within early access window).
                 $couldhavestartedyet = $now > ($starttime - $earlystartwindow);
+                $include = ($zoom->recurring || $couldhavestartedyet);
+            }
 
-                if ($zoom->recurring || $couldhavestartedyet) {
-                    $hostmeetings[$zoom->host_id][$zoom->meeting_id] = $zoom;
+            if (!$include) {
+                continue;
+            }
+
+            $hostmeetings[$zoom->host_id][$zoom->meeting_id] = $zoom;
+
+            // Custom dates: each session is its own Zoom meeting. Register every
+            // per-session meeting id so their recordings map back to this activity.
+            if (!empty($zoom->recurring) && (int) ($zoom->recurrence_type ?? 0) === ZOOM_RECURRINGTYPE_CUSTOM) {
+                $occs = $DB->get_records('zoomyt_custom_occurrences', ['zoomid' => $zoom->id]);
+                foreach ($occs as $occ) {
+                    if (!empty($occ->meeting_id)) {
+                        $hostmeetings[$zoom->host_id][$occ->meeting_id] = $zoom;
+                    }
                 }
             }
         }

@@ -214,8 +214,10 @@ class webhook_handler {
 
         $this->log("Meeting ended: {$topic} (ID: {$meetingid}, UUID: {$uuid})");
 
-        // Find the Moodle activity for this meeting.
-        $zoom = $DB->get_record('zoomyt', ['meeting_id' => $meetingid]);
+        // Find the Moodle activity for this meeting (incl. custom-dates per-session meetings).
+        global $CFG;
+        require_once($CFG->dirroot . '/mod/zoomyt/locallib.php');
+        $zoom = \zoomyt_get_instance_by_zoom_meetingid($meetingid);
         if (!$zoom) {
             $this->log("Meeting {$meetingid} not found in Moodle");
             return ['status' => 200, 'body' => ['message' => 'Meeting not tracked']];
@@ -272,8 +274,10 @@ class webhook_handler {
 
         $this->log("Recording completed: {$topic} (ID: {$meetingid}, UUID: {$uuid})");
 
-        // Find the Moodle activity for this meeting.
-        $zoom = $DB->get_record('zoomyt', ['meeting_id' => $meetingid]);
+        // Find the Moodle activity for this meeting (incl. custom-dates per-session meetings).
+        global $CFG;
+        require_once($CFG->dirroot . '/mod/zoomyt/locallib.php');
+        $zoom = \zoomyt_get_instance_by_zoom_meetingid($meetingid);
         if (!$zoom) {
             $this->log("Meeting {$meetingid} not found in Moodle");
             return ['status' => 200, 'body' => ['message' => 'Meeting not tracked']];

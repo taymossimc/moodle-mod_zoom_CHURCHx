@@ -728,6 +728,9 @@ $string['interpretation_notice_sign'] = 'Hay interpretación en lengua de signos
 
 // v2.7.2 additions.
 $string['customdates_timezone'] = 'Las horas siguientes están en tu zona horaria: {$a}';
+$string['customdates_next_session'] = 'Siguiente';
+$string['custom_sync_summary'] = 'Sesiones sincronizadas con Zoom: {$a->created} creada(s), {$a->updated} actualizada(s), {$a->deleted} eliminada(s).';
+$string['custom_sync_errors'] = 'Algunas sesiones no se pudieron sincronizar con Zoom ({$a}):';
 $string['interpretation_email'] = 'Correo del intérprete';
 $string['interpretation_email_placeholder'] = 'nombre@ejemplo.com';
 $string['interpretation_email_help'] = 'El correo debe corresponder a un usuario activo en tu cuenta Zoom; de lo contrario Zoom rechazará la creación/actualización.';

@@ -1035,6 +1035,52 @@ class webservice {
     }
 
     /**
+     * Create a single fixed-time (type 2) scheduled Zoom meeting for one session.
+     *
+     * Used by custom-dates activities, which create one scheduled meeting per
+     * session date instead of a single recurring (type 3) meeting. The $zoom
+     * record is cloned and forced non-recurring so database_to_api() emits a
+     * scheduled meeting carrying start_time/duration (and any interpretation
+     * settings) for this specific session.
+     *
+     * @param stdClass $zoom The activity record (used as a template).
+     * @param int $starttime Session start, Unix timestamp.
+     * @param int $durationseconds Session duration in seconds.
+     * @param ?int $cmid The cmid if available.
+     * @return stdClass The Zoom API response (->id, ->join_url, ...).
+     */
+    public function create_scheduled_occurrence($zoom, int $starttime, int $durationseconds, $cmid = null) {
+        $clone = clone $zoom;
+        $clone->recurring = 0;
+        $clone->start_time = $starttime;
+        $clone->duration = $durationseconds;
+
+        $url = "users/$clone->host_id/" . (!empty($clone->webinar) ? 'webinars' : 'meetings');
+        return $this->make_call($url, $this->database_to_api($clone, $cmid), 'post');
+    }
+
+    /**
+     * Update an existing per-session scheduled meeting (start time / duration).
+     *
+     * @param stdClass $zoom The activity record (used as a template).
+     * @param int|string $meetingid The Zoom meeting ID for this session.
+     * @param int $starttime Session start, Unix timestamp.
+     * @param int $durationseconds Session duration in seconds.
+     * @param ?int $cmid The cmid if available.
+     * @return void
+     */
+    public function update_scheduled_occurrence($zoom, $meetingid, int $starttime, int $durationseconds, $cmid = null) {
+        $clone = clone $zoom;
+        $clone->recurring = 0;
+        $clone->start_time = $starttime;
+        $clone->duration = $durationseconds;
+        $clone->meeting_id = $meetingid;
+
+        $url = (!empty($clone->webinar) ? 'webinars/' : 'meetings/') . $meetingid;
+        $this->make_call($url, $this->database_to_api($clone, $cmid), 'patch');
+    }
+
+    /**
      * Update only the alternative hosts for a meeting or webinar on Zoom.
      *
      * This sends a targeted PATCH that only modifies the alternative_hosts setting,

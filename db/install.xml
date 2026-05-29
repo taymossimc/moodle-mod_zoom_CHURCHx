@@ -343,6 +343,9 @@
         <FIELD NAME="zoomid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Link to zoomyt activity."/>
         <FIELD NAME="start_time" TYPE="int" LENGTH="12" NOTNULL="true" SEQUENCE="false" COMMENT="Session start (Unix timestamp)."/>
         <FIELD NAME="duration" TYPE="int" LENGTH="6" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Duration in minutes."/>
+        <FIELD NAME="meeting_id" TYPE="int" LENGTH="15" NOTNULL="false" SEQUENCE="false" COMMENT="Zoom meeting ID for this session (one scheduled meeting per session)."/>
+        <FIELD NAME="join_url" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="Zoom join URL for this session."/>
+        <FIELD NAME="exists_on_zoom" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="Whether the Zoom meeting for this session still exists."/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="12" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timemodified" TYPE="int" LENGTH="12" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
       </FIELDS>
@@ -352,6 +355,7 @@
       </KEYS>
       <INDEXES>
         <INDEX NAME="zoomid_start_idx" UNIQUE="false" FIELDS="zoomid, start_time"/>
+        <INDEX NAME="meeting_id_idx" UNIQUE="false" FIELDS="meeting_id"/>
       </INDEXES>
     </TABLE>
   </TABLES>

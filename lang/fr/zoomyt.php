@@ -728,6 +728,9 @@ $string['interpretation_notice_sign'] = 'Une interprétation en langue des signe
 
 // v2.7.2 additions.
 $string['customdates_timezone'] = 'Les heures saisies sont dans votre fuseau horaire : {$a}';
+$string['customdates_next_session'] = 'Prochaine';
+$string['custom_sync_summary'] = 'Sessions synchronisées avec Zoom : {$a->created} créée(s), {$a->updated} mise(s) à jour, {$a->deleted} supprimée(s).';
+$string['custom_sync_errors'] = 'Certaines sessions n\'ont pas pu être synchronisées avec Zoom ({$a}) :';
 $string['interpretation_email'] = 'Courriel de l\'interprète';
 $string['interpretation_email_placeholder'] = 'nom@exemple.com';
 $string['interpretation_email_help'] = 'Le courriel doit correspondre à un utilisateur actif de votre compte Zoom ; sinon Zoom refusera la création/mise à jour.';

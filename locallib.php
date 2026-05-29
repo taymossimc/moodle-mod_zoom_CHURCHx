@@ -170,11 +170,304 @@ function zoomyt_parse_custom_occurrences_json(?string $json): array {
             continue;
         }
         $out[] = [
+            'id' => !empty($row['id']) ? (int) $row['id'] : 0,
             'start_time' => (int) $row['start_time'],
             'duration' => (int) ($row['duration'] ?? 60),
         ];
     }
     return $out;
+}
+
+/**
+ * Create a single per-session scheduled Zoom meeting, retrying without problematic alt hosts.
+ *
+ * Mirrors zoomyt_create_meeting_with_alt_host_retry() but targets one fixed-time
+ * session (used by custom-dates activities that create one meeting per date).
+ *
+ * @param stdClass $zoom Activity record (template; alternative_hosts may be modified).
+ * @param int $starttime Session start, Unix timestamp.
+ * @param int $durationseconds Session duration in seconds.
+ * @return stdClass Zoom API response (->id, ->join_url, ...).
+ * @throws moodle_exception If creation fails for non-alt-host reasons.
+ */
+function zoomyt_create_occurrence_with_retry($zoom, int $starttime, int $durationseconds) {
+    $service = zoomyt_webservice();
+    $cmid = $zoom->coursemodule ?? null;
+    $maxretries = 5;
+
+    for ($attempt = 0; $attempt <= $maxretries; $attempt++) {
+        try {
+            return $service->create_scheduled_occurrence($zoom, $starttime, $durationseconds, $cmid);
+        } catch (moodle_exception $e) {
+            $bademail = zoomyt_extract_bad_alt_host_email($e->getMessage());
+            if ($bademail === null || empty($zoom->alternative_hosts)) {
+                throw $e;
+            }
+            $zoom->alternative_hosts = zoomyt_remove_alt_host($zoom->alternative_hosts, $bademail);
+        }
+    }
+
+    return $service->create_scheduled_occurrence($zoom, $starttime, $durationseconds, $cmid);
+}
+
+/**
+ * Reconcile the per-session Zoom meetings for a custom-dates activity.
+ *
+ * For each desired session: creates a scheduled Zoom meeting (new), updates the
+ * existing one (time/duration changed), or leaves it untouched. Sessions present
+ * in the DB but missing from the desired set have their Zoom meeting deleted.
+ * Rows are persisted in zoomyt_custom_occurrences, preserving meeting_ids.
+ *
+ * @param stdClass $zoom Activity record (id, host_id, webinar, and option_* fields required).
+ * @param array $desired List of ['id'=>?int, 'start_time'=>int, 'duration'=>int minutes].
+ * @return array ['errors'=>string[], 'created'=>int, 'updated'=>int, 'deleted'=>int]
+ */
+function zoomyt_sync_custom_occurrence_meetings(stdClass $zoom, array $desired): array {
+    global $DB;
+
+    $service = zoomyt_webservice();
+    $now = time();
+    $errors = [];
+    $created = 0;
+    $updated = 0;
+    $deleted = 0;
+
+    $existing = $DB->get_records('zoomyt_custom_occurrences', ['zoomid' => $zoom->id]);
+    $keep = [];
+
+    foreach ($desired as $occ) {
+        $start = (int) ($occ['start_time'] ?? 0);
+        if (empty($start)) {
+            continue;
+        }
+        $durmin = max(1, (int) ($occ['duration'] ?? 60));
+        $dursec = $durmin * 60;
+        $id = !empty($occ['id']) ? (int) $occ['id'] : 0;
+        $row = ($id && isset($existing[$id])) ? $existing[$id] : null;
+
+        // Existing session that already has a Zoom meeting: update in place if changed.
+        if ($row && !empty($row->meeting_id) && !empty($row->exists_on_zoom)) {
+            $keep[$row->id] = true;
+            if ((int) $row->start_time !== $start || (int) $row->duration !== $durmin) {
+                try {
+                    $service->update_scheduled_occurrence($zoom, $row->meeting_id, $start, $dursec,
+                        $zoom->coursemodule ?? null);
+                    $updated++;
+                } catch (moodle_exception $e) {
+                    $errors[] = userdate($start) . ': ' . $e->getMessage();
+                }
+                $row->start_time = $start;
+                $row->duration = $durmin;
+                $row->timemodified = $now;
+                $DB->update_record('zoomyt_custom_occurrences', $row);
+            }
+            continue;
+        }
+
+        // New session, or an existing row that never got a Zoom meeting: create one.
+        $meetingid = null;
+        $joinurl = null;
+        try {
+            $resp = zoomyt_create_occurrence_with_retry($zoom, $start, $dursec);
+            $meetingid = $resp->id ?? null;
+            $joinurl = $resp->join_url ?? null;
+        } catch (moodle_exception $e) {
+            $errors[] = userdate($start) . ': ' . $e->getMessage();
+        }
+
+        if ($row) {
+            $keep[$row->id] = true;
+            $row->start_time = $start;
+            $row->duration = $durmin;
+            $row->meeting_id = $meetingid;
+            $row->join_url = $joinurl;
+            $row->exists_on_zoom = $meetingid ? 1 : 0;
+            $row->timemodified = $now;
+            $DB->update_record('zoomyt_custom_occurrences', $row);
+        } else {
+            $new = new stdClass();
+            $new->zoomid = $zoom->id;
+            $new->start_time = $start;
+            $new->duration = $durmin;
+            $new->meeting_id = $meetingid;
+            $new->join_url = $joinurl;
+            $new->exists_on_zoom = $meetingid ? 1 : 0;
+            $new->timecreated = $now;
+            $new->timemodified = $now;
+            $keep[$DB->insert_record('zoomyt_custom_occurrences', $new)] = true;
+        }
+
+        if ($meetingid) {
+            $created++;
+        }
+    }
+
+    // Sessions removed in Moodle: delete their Zoom meeting, then the row.
+    foreach ($existing as $row) {
+        if (!empty($keep[$row->id])) {
+            continue;
+        }
+        if (!empty($row->meeting_id) && !empty($row->exists_on_zoom)) {
+            try {
+                $service->delete_meeting($row->meeting_id, $zoom->webinar);
+                $deleted++;
+            } catch (moodle_exception $e) {
+                // A meeting that is already gone on Zoom is fine; anything else is reported.
+                if (!(isset($e->zoomerrorcode) && zoomyt_is_meeting_gone_error($e))) {
+                    $errors[] = userdate($row->start_time) . ': ' . $e->getMessage();
+                }
+            }
+        }
+        $DB->delete_records('zoomyt_custom_occurrences', ['id' => $row->id]);
+    }
+
+    return ['errors' => $errors, 'created' => $created, 'updated' => $updated, 'deleted' => $deleted];
+}
+
+/**
+ * Pick the representative ("active") session for a custom-dates activity.
+ *
+ * Returns the in-progress or next upcoming session that has a live Zoom meeting,
+ * falling back to the most recent past session. Used to drive the single smart
+ * Join/Start button and the parent zoomyt.meeting_id representative.
+ *
+ * @param stdClass $zoom Activity record.
+ * @return stdClass|null The occurrence row, or null if none/ not a custom activity.
+ */
+function zoomyt_get_active_occurrence(stdClass $zoom): ?stdClass {
+    if (empty($zoom->recurring) || (int) ($zoom->recurrence_type ?? 0) !== ZOOM_RECURRINGTYPE_CUSTOM) {
+        return null;
+    }
+
+    $rows = zoomyt_get_custom_occurrences($zoom->id); // Sorted by start_time ASC.
+    $valid = array_values(array_filter($rows, function($r) {
+        return !empty($r->meeting_id) && !empty($r->exists_on_zoom);
+    }));
+    if (empty($valid)) {
+        return null;
+    }
+
+    // First session that has not yet finished (matches zoomyt_get_next_occurrence semantics).
+    $now = time();
+    foreach ($valid as $row) {
+        $end = (int) $row->start_time + ((int) $row->duration * 60);
+        if ($end >= $now) {
+            return $row;
+        }
+    }
+
+    // All sessions are in the past: use the most recent one.
+    return end($valid);
+}
+
+/**
+ * Copy the active/next session's Zoom details onto the parent zoomyt row.
+ *
+ * Keeps zoomyt.meeting_id / join_url / start_time / duration pointing at the
+ * session a user would currently join, so existing single-meeting code paths and
+ * the activity view keep working. Mutates $zoom and persists the change.
+ *
+ * @param stdClass $zoom Activity record (id required; mutated in place).
+ * @return void
+ */
+function zoomyt_apply_custom_representative(stdClass $zoom): void {
+    global $DB;
+
+    $active = zoomyt_get_active_occurrence($zoom);
+    $update = (object) ['id' => $zoom->id];
+
+    if ($active) {
+        $update->meeting_id = $active->meeting_id;
+        $update->join_url = $active->join_url;
+        $update->start_time = (int) $active->start_time;
+        $update->duration = (int) $active->duration * 60;
+        $update->exists_on_zoom = ZOOM_MEETING_EXISTS;
+    } else {
+        // No live session meeting (e.g. all creations failed or all sessions removed).
+        $update->meeting_id = 0;
+        $update->join_url = '';
+    }
+
+    $DB->update_record('zoomyt', $update);
+    foreach ((array) $update as $field => $value) {
+        $zoom->$field = $value;
+    }
+}
+
+/**
+ * Show admin/teacher notifications summarising a custom-occurrence sync.
+ *
+ * @param array $result Output of zoomyt_sync_custom_occurrence_meetings().
+ * @return void
+ */
+function zoomyt_notify_custom_sync_result(array $result): void {
+    $changed = ($result['created'] ?? 0) + ($result['updated'] ?? 0) + ($result['deleted'] ?? 0);
+    if ($changed > 0) {
+        \core\notification::success(get_string('custom_sync_summary', 'zoomyt', (object) [
+            'created' => $result['created'] ?? 0,
+            'updated' => $result['updated'] ?? 0,
+            'deleted' => $result['deleted'] ?? 0,
+        ]));
+    }
+    if (!empty($result['errors'])) {
+        \core\notification::error(
+            get_string('custom_sync_errors', 'zoomyt', count($result['errors'])) .
+            ' ' . implode(' | ', $result['errors'])
+        );
+    }
+}
+
+/**
+ * Resolve a Zoom meeting ID to its parent zoomyt activity.
+ *
+ * Checks the activity's own meeting_id first, then per-session custom-dates
+ * meetings, so webhooks/recordings/reports for any session of a custom activity
+ * map back to the activity.
+ *
+ * @param int|string $zoommeetingid The Zoom meeting ID from a payload/API response.
+ * @return stdClass|false The zoomyt record, or false if not tracked.
+ */
+function zoomyt_get_instance_by_zoom_meetingid($zoommeetingid) {
+    global $DB;
+
+    if (empty($zoommeetingid)) {
+        return false;
+    }
+
+    $zoom = $DB->get_record('zoomyt', ['meeting_id' => $zoommeetingid]);
+    if ($zoom) {
+        return $zoom;
+    }
+
+    $occ = $DB->get_record('zoomyt_custom_occurrences', ['meeting_id' => $zoommeetingid], 'zoomid', IGNORE_MULTIPLE);
+    if ($occ) {
+        return $DB->get_record('zoomyt', ['id' => $occ->zoomid]);
+    }
+
+    return false;
+}
+
+/**
+ * Point the in-memory zoomyt record at its active/next custom session.
+ *
+ * For custom-dates activities the meeting a user joins changes over time, so the
+ * stored representative may be stale between edits. This overrides meeting_id /
+ * join_url / start_time / duration in memory (no DB write) at request time, so
+ * the activity view, state calculation, and Join/Start routing target the right
+ * session. No-op for non-custom activities.
+ *
+ * @param stdClass $zoom Activity record (mutated in place and returned).
+ * @return stdClass
+ */
+function zoomyt_point_to_active_occurrence(stdClass $zoom): stdClass {
+    $active = zoomyt_get_active_occurrence($zoom);
+    if ($active) {
+        $zoom->meeting_id = $active->meeting_id;
+        $zoom->join_url = $active->join_url;
+        $zoom->start_time = (int) $active->start_time;
+        $zoom->duration = (int) $active->duration * 60;
+    }
+    return $zoom;
 }
 
 /**
@@ -1321,6 +1614,10 @@ function zoomyt_load_meeting($id, $context, $usestarturl = true) {
     $cm = get_coursemodule_from_id('zoomyt', $id, 0, false, MUST_EXIST);
     $course = get_course($cm->course);
     $zoom = $DB->get_record('zoomyt', ['id' => $cm->instance], '*', MUST_EXIST);
+
+    // Custom dates: launch the active/next session's Zoom meeting (start_url/join_url
+    // and meeting_id all follow the active session).
+    $zoom = zoomyt_point_to_active_occurrence($zoom);
 
     require_login($course, true, $cm);
 

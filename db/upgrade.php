@@ -1714,5 +1714,96 @@ function xmldb_zoomyt_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026051206, 'zoomyt');
     }
 
+    if ($oldversion < 2026052900) {
+        // v2.9: custom-dates activities now use one fixed-time (type 2) Zoom meeting
+        // per session instead of a single recurring (type 3) meeting. Add per-session
+        // Zoom columns to zoomyt_custom_occurrences, then migrate existing activities.
+        global $CFG;
+
+        $table = new xmldb_table('zoomyt_custom_occurrences');
+
+        $field = new xmldb_field('meeting_id', XMLDB_TYPE_INTEGER, '15', null, null, null, null, 'duration');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $field = new xmldb_field('join_url', XMLDB_TYPE_TEXT, null, null, null, null, null, 'meeting_id');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $field = new xmldb_field('exists_on_zoom', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '1', 'join_url');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $index = new xmldb_index('meeting_id_idx', XMLDB_INDEX_NOTUNIQUE, ['meeting_id']);
+        if (!$dbman->index_exists($table, $index)) {
+            $dbman->add_index($table, $index);
+        }
+
+        // One-time migration of existing custom-dates activities.
+        require_once($CFG->dirroot . '/mod/zoomyt/lib.php');
+        require_once($CFG->dirroot . '/mod/zoomyt/locallib.php');
+
+        // Bail out gracefully if the Zoom webservice isn't usable; the schema is in
+        // place and activities will migrate the first time they are edited.
+        $servicereadyforupgrade = true;
+        try {
+            zoomyt_webservice();
+        } catch (\Throwable $e) {
+            $servicereadyforupgrade = false;
+            mtrace('ZoomYT v2.9: skipping custom-dates migration (Zoom webservice unavailable): ' . $e->getMessage());
+        }
+
+        if ($servicereadyforupgrade) {
+            $customs = $DB->get_records_select('zoomyt', 'recurring = 1 AND recurrence_type = ?',
+                [ZOOM_RECURRINGTYPE_CUSTOM]);
+            foreach ($customs as $zoom) {
+                try {
+                    $oldmeetingid = $zoom->meeting_id;
+
+                    $occs = $DB->get_records('zoomyt_custom_occurrences', ['zoomid' => $zoom->id], 'start_time ASC');
+                    if (empty($occs)) {
+                        continue;
+                    }
+
+                    $desired = [];
+                    foreach ($occs as $o) {
+                        $desired[] = [
+                            'id' => (int) $o->id,
+                            'start_time' => (int) $o->start_time,
+                            'duration' => (int) $o->duration,
+                        ];
+                    }
+
+                    // Creates one scheduled meeting per session (rows currently lack meeting_id).
+                    zoomyt_sync_custom_occurrence_meetings($zoom, $desired);
+                    zoomyt_apply_custom_representative($zoom);
+
+                    // Remove the now-redundant recurring (type 3) meeting on Zoom, unless an
+                    // occurrence happens to reuse that id.
+                    $stillused = $DB->record_exists('zoomyt_custom_occurrences',
+                        ['zoomid' => $zoom->id, 'meeting_id' => $oldmeetingid]);
+                    if (!empty($oldmeetingid) && !$stillused) {
+                        try {
+                            zoomyt_webservice()->delete_meeting($oldmeetingid, $zoom->webinar);
+                        } catch (\Throwable $e) {
+                            mtrace('ZoomYT v2.9: could not delete old meeting ' . $oldmeetingid .
+                                ' for activity ' . $zoom->id . ': ' . $e->getMessage());
+                        }
+                    }
+
+                    mtrace('ZoomYT v2.9: migrated custom-dates activity ' . $zoom->id .
+                        ' (' . count($occs) . ' sessions)');
+                } catch (\Throwable $e) {
+                    mtrace('ZoomYT v2.9: migration failed for activity ' . $zoom->id . ': ' . $e->getMessage());
+                }
+            }
+        }
+
+        upgrade_mod_savepoint(true, 2026052900, 'zoomyt');
+    }
+
     return true;
 }

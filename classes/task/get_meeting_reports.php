@@ -891,6 +891,16 @@ class get_meeting_reports extends scheduled_task {
 
         // Grade every gradeable student: enrolled + active, excluding teachers/graders.
         $enrolled = get_enrolled_users($context, '', 0, 'u.id', null, 0, 0, true);
+
+        // Re-load existing grades for these specific users. grade_get_grades() only populates the
+        // per-user grades (and the overridden flag) when user ids are passed in.
+        if (!empty($enrolled)) {
+            $existing = grade_get_grades($courseid, 'mod', 'zoomyt', $zoomrecord->id, array_keys($enrolled));
+            if (!empty($existing->items)) {
+                $oldgrades = $existing->items[0]->grades;
+            }
+        }
+
         foreach ($enrolled as $user) {
             $userid = (int) $user->id;
 

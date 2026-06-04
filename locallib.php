@@ -1803,34 +1803,10 @@ function zoomyt_load_meeting($id, $context, $usestarturl = true) {
     $completion = new completion_info($course);
     $completion->set_module_viewed($cm);
 
-    // Check the grading method settings.
-    if (!empty($zoom->grading_method)) {
-        $gradingmethod = $zoom->grading_method;
-    } else if ($defaultgrading = get_config('gradingmethod', 'zoomyt')) {
-        $gradingmethod = $defaultgrading;
-    } else {
-        $gradingmethod = 'entry';
-    }
-
-    if ($gradingmethod === 'entry') {
-        // Check whether user has a grade. If not, then assign full credit to them.
-        $gradelist = grade_get_grades($course->id, 'mod', 'zoomyt', $cm->instance, $USER->id);
-
-        // Assign full credits for user who has no grade yet, if this meeting is gradable (i.e. the grade type is not "None").
-        if (!empty($gradelist->items) && empty($gradelist->items[0]->grades[$USER->id]->grade)) {
-            $grademax = $gradelist->items[0]->grademax;
-            $grades = [
-                'rawgrade' => $grademax,
-                'userid' => $USER->id,
-                'usermodified' => $USER->id,
-                'dategraded' => '',
-                'feedbackformat' => '',
-                'feedback' => '',
-            ];
-
-            zoomyt_grade_item_update($zoom, $grades);
-        }
-    } // Otherwise, the get_meetings_report task calculates the grades according to duration.
+    // Grading (for both the 'entry' and 'period' methods) is handled by the get_meeting_reports
+    // task, which aggregates attendance across all sessions of this activity. Clicking Join no
+    // longer grants an immediate grade, because a single click can't represent a multi-session
+    // aggregate; the grade is assigned/updated once the Zoom attendance report is imported.
 
     // Upgrade host upon joining meeting, if host is not Licensed.
     if ($userishost) {

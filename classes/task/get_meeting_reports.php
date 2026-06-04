@@ -723,9 +723,9 @@ class get_meeting_reports extends scheduled_task {
                 $gradingmethod = 'entry';
             }
 
-            if ($recordupdated && $gradingmethod === 'period') {
-                // Grade users according to their duration in the meeting.
-                $this->grading_participant_upon_duration($zoomrecord, $detailsid);
+            if ($recordupdated && ($gradingmethod === 'period' || $gradingmethod === 'entry')) {
+                // Recalculate the aggregate participation grade across all sessions of this activity.
+                $this->recalculate_aggregate_grades($zoomrecord);
             }
 
             $transaction->allow_commit();
@@ -740,23 +740,34 @@ class get_meeting_reports extends scheduled_task {
     }
 
     /**
-     * Update the grades of users according to their duration in the meeting.
+     * Recalculate the aggregate participation grade for every gradeable student in an activity.
+     *
+     * Both grading methods aggregate across all sessions (zoomyt_meeting_details rows) that have
+     * occurred and been imported so far:
+     *  - 'period' (attendance duration): grademax * (total attended seconds / total length of all
+     *    sessions held), capped at grademax. Time-weighted: longer sessions count more.
+     *  - 'entry': grademax * (number of sessions the user appeared in / sessions held).
+     *
+     * Enrolled students with no attendance receive 0. Manual gradebook overrides are preserved.
+     * Teachers/graders (moodle/grade:edit) are not graded.
+     *
      * @param object $zoomrecord
-     * @param int $detailsid
-     * @return void
+     * @param bool $dryrun When true, compute grades but do not write them or notify; return the preview.
+     * @return array Map of userid => ['old' => float|null, 'new' => float] for grades that would change.
      */
-    public function grading_participant_upon_duration($zoomrecord, $detailsid) {
+    public function recalculate_aggregate_grades($zoomrecord, $dryrun = false) {
         global $CFG, $DB;
 
         require_once($CFG->libdir . '/gradelib.php');
         $courseid = $zoomrecord->course;
         $context = context_course::instance($courseid);
+
         // Get grade list for items.
         $gradelist = grade_get_grades($courseid, 'mod', 'zoomyt', $zoomrecord->id);
 
-        // Is this meeting is not gradable, return.
+        // If this activity is not gradable, return.
         if (empty($gradelist->items)) {
-            return;
+            return [];
         }
 
         $gradeitem = $gradelist->items[0];
@@ -764,140 +775,214 @@ class get_meeting_reports extends scheduled_task {
         $grademax = $gradeitem->grademax;
         $oldgrades = $gradeitem->grades;
 
-        // After check and testing, these timings are the actual meeting timings returned from zoom
-        // ... (i.e.when the host start and end the meeting).
-        // Not like those on 'zoomyt' table which represent the settings from zoom activity.
-        $meetingtime = $DB->get_record('zoomyt_meeting_details', ['id' => $detailsid], 'start_time, end_time');
-        if (empty($zoomrecord->recurring)) {
-            $end = min($meetingtime->end_time, $zoomrecord->start_time + $zoomrecord->duration);
-            $start = max($meetingtime->start_time, $zoomrecord->start_time);
-            $meetingduration = $end - $start;
+        // Resolve the grading method (instance setting, then site default, then 'entry').
+        if (!empty($zoomrecord->grading_method)) {
+            $gradingmethod = $zoomrecord->grading_method;
+        } else if ($defaultgrading = get_config('gradingmethod', 'zoomyt')) {
+            $gradingmethod = $defaultgrading;
         } else {
-            $meetingduration = $meetingtime->end_time - $meetingtime->start_time;
+            $gradingmethod = 'entry';
         }
 
-        // Get the required records again.
-        $records = $DB->get_records('zoomyt_meeting_participants', ['detailsid' => $detailsid], 'join_time ASC');
-        // Initialize the data arrays, indexing them later with userids.
-        $durations = [];
-        $join = [];
-        $leave = [];
-        // Looping the data to calculate the duration of each user.
-        foreach ($records as $record) {
-            $userid = $record->userid;
-            if (empty($userid)) {
-                if (is_numeric($record->name)) {
-                    // In case the participant name looks like an integer, we need to avoid a conflict.
-                    $userid = '~' . $record->name . '~';
-                } else {
-                    $userid = $record->name;
-                }
-            }
-
-            // Check if there is old duration stored for this user.
-            if (!empty($durations[$userid])) {
-                $old = new stdClass();
-                $old->duration = $durations[$userid];
-                $old->join_time = $join[$userid];
-                $old->leave_time = $leave[$userid];
-                // Calculating the overlap time.
-                $overlap = $this->get_participant_overlap_time($old, $record);
-
-                // Set the new data for next use.
-                $leave[$userid] = max($old->leave_time, $record->leave_time);
-                $join[$userid] = min($old->join_time, $record->join_time);
-                $durations[$userid] = $old->duration + $record->duration - $overlap;
-            } else {
-                $leave[$userid] = $record->leave_time;
-                $join[$userid] = $record->join_time;
-                $durations[$userid] = $record->duration;
-            }
+        // Only the aggregate-capable methods are handled here.
+        if ($gradingmethod !== 'period' && $gradingmethod !== 'entry') {
+            return [];
         }
 
-        // Used to count the number of users being graded.
-        $graded = 0;
-        $alreadygraded = 0;
+        // Load every session that has occurred for this activity.
+        $sessions = $DB->get_records('zoomyt_meeting_details', ['zoomid' => $zoomrecord->id]);
+        if (empty($sessions)) {
+            return [];
+        }
 
-        // Array of unidentified users that need to be graded manually.
-        $needgrade = [];
+        // Cross-session aggregates (keyed by userid). Numeric-string keys become int keys in PHP,
+        // so real Moodle users end up with integer keys while unidentified ones stay strings.
+        $totalmeetingduration = 0;
+        $sessionsheld = 0;
+        $attendedseconds = [];
+        $attendedsessions = [];
+        $unidentified = [];
+        $seenuserids = [];
 
-        // Array of found user ids.
-        $found = [];
+        foreach ($sessions as $session) {
+            // Actual length of this session (host start -> end). Fall back to stored duration.
+            $sessionduration = (int) $session->end_time - (int) $session->start_time;
+            if ($sessionduration <= 0) {
+                $sessionduration = (int) $session->duration;
+            }
+            if ($sessionduration <= 0) {
+                // A zero-length session can't be graded; exclude it from the denominators.
+                continue;
+            }
 
-        // Array of non-enrolled users.
-        $notenrolled = [];
+            $sessionsheld++;
+            $totalmeetingduration += $sessionduration;
 
-        // Now check the duration for each user and grade them according to it.
-        foreach ($durations as $userid => $userduration) {
-            // Setup the grade according to the duration.
-            $newgrade = min($userduration * $grademax / $meetingduration, $grademax);
-
-            // Double check that this is a Moodle user.
-            if (is_integer($userid) && (isset($found[$userid]) || $DB->record_exists('user', ['id' => $userid]))) {
-                // Successfully found this user in Moodle.
-                if (!isset($found[$userid])) {
-                    $found[$userid] = true;
-                }
-
-                $oldgrade = null;
-                if (isset($oldgrades[$userid])) {
-                    $oldgrade = $oldgrades[$userid]->grade;
-                }
-
-                // Check if the user is enrolled before assign the grade.
-                if (is_enrolled($context, $userid)) {
-                    // Compare with the old grade and only update if the new grade is higher.
-                    // Use number_format because the old stored grade only contains 5 decimals.
-                    if (empty($oldgrade) || $oldgrade < number_format($newgrade, 5)) {
-                        $gradegrade = [
-                            'rawgrade' => $newgrade,
-                            'userid' => $userid,
-                            'usermodified' => $userid,
-                            'dategraded' => '',
-                            'feedbackformat' => '',
-                            'feedback' => '',
-                        ];
-
-                        zoomyt_grade_item_update($zoomrecord, $gradegrade);
-                        $graded++;
-                        $this->debugmsg('grade updated for user with id: ' . $userid
-                                        . ', duration =' . $userduration
-                                        . ', maxgrade =' . $grademax
-                                        . ', meeting duration =' . $meetingduration
-                                        . ', User grade:' . $newgrade);
+            // Per-user de-overlapped attendance time within this session.
+            $records = $DB->get_records('zoomyt_meeting_participants', ['detailsid' => $session->id], 'join_time ASC');
+            $durations = [];
+            $join = [];
+            $leave = [];
+            foreach ($records as $record) {
+                $userid = $record->userid;
+                if (empty($userid)) {
+                    if (is_numeric($record->name)) {
+                        // In case the participant name looks like an integer, we need to avoid a conflict.
+                        $userid = '~' . $record->name . '~';
                     } else {
-                        $alreadygraded++;
-                        $this->debugmsg('User already has a higher grade. Old grade: ' . $oldgrade
-                                        . ', New grade: ' . $newgrade);
+                        $userid = $record->name;
                     }
-                } else {
-                    $notenrolled[$userid] = fullname(core_user::get_user($userid));
                 }
-            } else {
-                // This means that this user was not identified.
-                // Provide information about participants that need to be graded manually.
-                $a = [
-                    'userid' => $userid,
-                    'grade' => $newgrade,
-                ];
-                $needgrade[] = get_string('nonrecognizedusergrade', 'mod_zoomyt', $a);
+
+                // Check if there is old duration stored for this user in this session.
+                if (!empty($durations[$userid])) {
+                    $old = new stdClass();
+                    $old->duration = $durations[$userid];
+                    $old->join_time = $join[$userid];
+                    $old->leave_time = $leave[$userid];
+                    // Calculating the overlap time.
+                    $overlap = $this->get_participant_overlap_time($old, $record);
+
+                    // Set the new data for next use.
+                    $leave[$userid] = max($old->leave_time, $record->leave_time);
+                    $join[$userid] = min($old->join_time, $record->join_time);
+                    $durations[$userid] = $old->duration + $record->duration - $overlap;
+                } else {
+                    $leave[$userid] = $record->leave_time;
+                    $join[$userid] = $record->join_time;
+                    $durations[$userid] = $record->duration;
+                }
+            }
+
+            // Fold this session's results into the cross-session aggregates.
+            foreach ($durations as $userid => $userduration) {
+                // Cap a user's time for this session at the session length (guards against overlap artifacts).
+                $capped = min($userduration, $sessionduration);
+                if (is_integer($userid)) {
+                    if (!isset($attendedseconds[$userid])) {
+                        $attendedseconds[$userid] = 0;
+                        $attendedsessions[$userid] = 0;
+                    }
+                    $attendedseconds[$userid] += $capped;
+                    $attendedsessions[$userid]++;
+                    $seenuserids[$userid] = true;
+                } else {
+                    if (!isset($unidentified[$userid])) {
+                        $unidentified[$userid] = ['seconds' => 0, 'sessions' => 0];
+                    }
+                    $unidentified[$userid]['seconds'] += $capped;
+                    $unidentified[$userid]['sessions']++;
+                }
             }
         }
 
-        // Get the list of users who clicked join meeting and were not recognized by the participant report.
+        if ($sessionsheld === 0 || ($gradingmethod === 'period' && $totalmeetingduration <= 0)) {
+            return [];
+        }
+
+        // Counters and notification buckets.
+        $changed = 0;
+        $alreadygraded = 0;
+        $needgrade = [];
+        $notenrolled = [];
+        $found = [];
+        $gradestoupdate = [];
+        $report = [];
+
+        // Grade every gradeable student: enrolled + active, excluding teachers/graders.
+        $enrolled = get_enrolled_users($context, '', 0, 'u.id', null, 0, 0, true);
+        foreach ($enrolled as $user) {
+            $userid = (int) $user->id;
+
+            // Don't push participation grades to teachers/graders.
+            if (has_capability('moodle/grade:edit', $context, $userid)) {
+                continue;
+            }
+            $found[$userid] = true;
+
+            $newgrade = $this->aggregate_user_grade(
+                $gradingmethod,
+                $grademax,
+                $attendedseconds[$userid] ?? 0,
+                $totalmeetingduration,
+                $attendedsessions[$userid] ?? 0,
+                $sessionsheld
+            );
+
+            // Respect manual gradebook overrides.
+            if (isset($oldgrades[$userid]) && !empty($oldgrades[$userid]->overridden)) {
+                continue;
+            }
+
+            // Compare with the stored grade. Stored grades keep 5 decimals.
+            $oldgrade = isset($oldgrades[$userid]) ? $oldgrades[$userid]->grade : null;
+            if ($oldgrade !== null && number_format((float) $oldgrade, 5) === number_format((float) $newgrade, 5)) {
+                $alreadygraded++;
+                continue;
+            }
+
+            $gradestoupdate[$userid] = [
+                'rawgrade' => $newgrade,
+                'userid' => $userid,
+                'usermodified' => $userid,
+                'dategraded' => '',
+                'feedbackformat' => '',
+                'feedback' => '',
+            ];
+            $report[$userid] = ['old' => $oldgrade, 'new' => $newgrade];
+            $changed++;
+            $this->debugmsg('aggregate grade for user ' . $userid . ': ' . $newgrade
+                            . ' (method=' . $gradingmethod . ', sessions held=' . $sessionsheld . ')');
+        }
+
+        // Identified attendees who are not gradeable here but exist in Moodle and are not enrolled.
+        foreach (array_keys($seenuserids) as $userid) {
+            if (!isset($found[$userid]) && !is_enrolled($context, $userid)
+                    && $DB->record_exists('user', ['id' => $userid])) {
+                $notenrolled[$userid] = fullname(core_user::get_user($userid));
+            }
+        }
+
+        // Unidentified attendees still need to be graded manually.
+        foreach ($unidentified as $pseudoid => $info) {
+            $g = $this->aggregate_user_grade(
+                $gradingmethod,
+                $grademax,
+                $info['seconds'],
+                $totalmeetingduration,
+                $info['sessions'],
+                $sessionsheld
+            );
+            $a = [
+                'userid' => $pseudoid,
+                'grade' => $g,
+            ];
+            $needgrade[] = get_string('nonrecognizedusergrade', 'mod_zoomyt', $a);
+        }
+
+        // On a dry run, report what would change without writing grades or notifying.
+        if ($dryrun) {
+            return $report;
+        }
+
+        // Push all changed grades in a single batch (grade_update accepts an array keyed by userid).
+        if (!empty($gradestoupdate)) {
+            zoomyt_grade_item_update($zoomrecord, $gradestoupdate);
+        }
+
+        // Get the list of users who clicked join meeting but were never recognized in any report.
         $allusers = $this->get_users_clicked_join($zoomrecord);
         $notfound = [];
         foreach ($allusers as $userid) {
-            if (!isset($found[$userid])) {
+            if (!isset($seenuserids[$userid])) {
                 $notfound[$userid] = fullname(core_user::get_user($userid));
             }
         }
 
-        // Try not to spam the instructors, only notify them when grades have changed.
-        if ($graded > 0) {
-            // Sending a notification to teachers in this course about grades, and users that need to be graded manually.
+        // Try not to spam the instructors: only notify them when grades have actually changed.
+        if ($changed > 0) {
             $notifydata = [
-                'graded' => $graded,
+                'graded' => $changed,
                 'alreadygraded' => $alreadygraded,
                 'needgrade' => $needgrade,
                 'courseid' => $courseid,
@@ -909,6 +994,34 @@ class get_meeting_reports extends scheduled_task {
             ];
             $this->notify_teachers($notifydata);
         }
+
+        return $report;
+    }
+
+    /**
+     * Compute a single user's aggregate grade for the resolved grading method.
+     *
+     * @param string $gradingmethod 'period' or 'entry'
+     * @param float $grademax Maximum grade for the item.
+     * @param int $attendedseconds Total de-overlapped seconds attended across sessions.
+     * @param int $totalmeetingduration Total length (seconds) of all sessions held.
+     * @param int $attendedsessions Number of sessions the user appeared in.
+     * @param int $sessionsheld Number of sessions held.
+     * @return float
+     */
+    protected function aggregate_user_grade($gradingmethod, $grademax, $attendedseconds, $totalmeetingduration,
+            $attendedsessions, $sessionsheld) {
+        if ($gradingmethod === 'period') {
+            if ($totalmeetingduration <= 0) {
+                return 0;
+            }
+            return min($attendedseconds * $grademax / $totalmeetingduration, $grademax);
+        }
+        // 'entry': proportion of sessions attended.
+        if ($sessionsheld <= 0) {
+            return 0;
+        }
+        return $grademax * $attendedsessions / $sessionsheld;
     }
 
     /**

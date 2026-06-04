@@ -163,7 +163,7 @@ $string['gradingentry'] = 'Upon entry';
 $string['gradinglink'] = 'Review or update grades';
 $string['gradingmessagebody'] = 'For Zoom Meeting session: {$a->zoomurl};
 <br>
-Number of users that have been automatically graded according to their duration in the meeting: {$a->graded}.
+Number of users whose aggregate participation grade was updated across all sessions: {$a->graded}.
 <br>
 Number of users that were already graded: {$a->alreadygraded}.
 <br>
@@ -177,10 +177,13 @@ $string['gradingmessagesubject'] = 'User grades for Zoom meeting: {$a->name}';
 $string['gradingmethod'] = 'Grading method';
 $string['gradingmethod_heading'] = 'Options for grading method';
 $string['gradingmethod_heading_help'] = 'Decide which method to use when grading Zoom participation.';
-$string['gradingmethod_help'] = 'Choose the method to use when grading student participation.<br>
-Upon entry: the student receives full marks (max grade) when they click to join the meeting in Moodle.<br>
-Attendance duration: the student receives a score based on the percentage of their meeting attendance compared to the total meeting duration.<br>
-Notes regarding Attendance duration method:<br>
+$string['gradingmethod_help'] = 'Choose the method to use when grading student participation. Both methods aggregate across all sessions of the activity that have taken place so far, and grades are recalculated as each new session\'s attendance report is imported.<br>
+Upon entry: the student\'s grade is the proportion of sessions they attended (max grade x sessions attended / sessions held).<br>
+Attendance duration: the student\'s grade is time-weighted across all sessions (max grade x total time attended / total length of all sessions held).<br>
+Notes:<br>
+- Both methods rely on the imported Zoom attendance report; grades appear/update after the report task runs (there is no longer an instant grade when clicking Join).<br>
+- Enrolled students with no attendance receive 0, and grades can decrease as more sessions are held.<br>
+- Manual grade overrides set in the gradebook are preserved and not overwritten.<br>
 - This method requires the display name to contain id or fullname.<br>
 - It is recommended to set the setting \'zoom | defaultjoinbeforehost\' to (No) so the meeting duration is accurate.<br>
 - Some students who are already signed in to the Zoom client with details not matching those in Moodle must be graded manually after reviewing the meeting report.';

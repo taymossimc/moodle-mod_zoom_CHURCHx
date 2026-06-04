@@ -629,8 +629,7 @@ final class get_meeting_reports_test extends advanced_testcase {
         // Prepare messages.
         $this->preventResetByRollback(); // Messaging does not like transactions...
         $sink = $this->redirectMessages();
-        // Process meeting reports should call the function grading_participant_upon_duration
-        // and insert grades.
+        // Process meeting reports should call recalculate_aggregate_grades() and insert grades.
         $this->assertTrue($this->meetingtask->process_meeting_reports($meeting));
         $this->assertEquals(1, $DB->count_records('zoomyt_meeting_details'));
         $this->assertEquals(8, $DB->count_records('zoomyt_meeting_participants'));
@@ -656,9 +655,9 @@ final class get_meeting_reports_test extends advanced_testcase {
         // Check grades for fourth user.
         $grade = $grades[$users[3]->id]->grade;
         $this->assertEquals(45, $grade);
-        // This user didn't enter the meeting.
+        // This user didn't enter the meeting: aggregate grading scores non-attendance as 0.
         $grade = $grades[$users[4]->id]->grade;
-        $this->assertEquals(null, $grade);
+        $this->assertEquals(0, $grade);
         // Let's check the teacher notification if it is ok?
         $messages = $sink->get_messages();
         // Only one teacher, means only one message.
@@ -687,7 +686,7 @@ final class get_meeting_reports_test extends advanced_testcase {
 
         $a = (object) [
             'name' => $zoomrecord->name,
-            'graded' => 4,
+            'graded' => 5,
             'alreadygraded' => 0,
             'needgrade' => $needgrade,
             'number' => 1,
@@ -718,13 +717,160 @@ final class get_meeting_reports_test extends advanced_testcase {
         // Check grade for fourth user.
         $grade = $grades[$users[3]->id]->grade;
         $this->assertEquals(45, $grade);
-        // This user didn't enter the meeting.
+        // This user didn't enter the meeting: still 0 from the first run, unchanged.
         $grade = $grades[$users[4]->id]->grade;
-        $this->assertEquals(null, $grade);
+        $this->assertEquals(0, $grade);
 
         // Let's check if the teacher notification is ok.
         $messages = $sink->get_messages();
         // No new messages as there has not been an update for participants.
         $this->assertEquals(1, count($messages));
+    }
+
+    /**
+     * Helper to insert a session (zoomyt_meeting_details) for an activity.
+     *
+     * @param int $zoomid Zoom instance id.
+     * @param int $start Session start time (Unix timestamp).
+     * @param int $length Session length in seconds.
+     * @param string $uuid Unique meeting uuid.
+     * @return int The new detailsid.
+     */
+    private function insert_session(int $zoomid, int $start, int $length, string $uuid): int {
+        global $DB;
+        $session = new stdClass();
+        $session->uuid = $uuid;
+        $session->meeting_id = 999000 + $zoomid;
+        $session->start_time = $start;
+        $session->end_time = $start + $length;
+        $session->duration = $length;
+        $session->topic = 'Session';
+        $session->total_minutes = (int) round($length / 60);
+        $session->participants_count = 0;
+        $session->zoomid = $zoomid;
+        return $DB->insert_record('zoomyt_meeting_details', $session);
+    }
+
+    /**
+     * Helper to insert a single participant attendance row for a session.
+     *
+     * @param int $detailsid Session id.
+     * @param int|null $userid Moodle user id (null for unidentified).
+     * @param string $name Participant display name.
+     * @param int $join Join time (Unix timestamp).
+     * @param int $duration Duration in seconds.
+     * @return void
+     */
+    private function insert_attendance(int $detailsid, ?int $userid, string $name, int $join, int $duration): void {
+        global $DB;
+        $row = new stdClass();
+        $row->userid = $userid;
+        $row->zoomuserid = (string) ($userid ?? 0);
+        $row->uuid = null;
+        $row->user_email = null;
+        $row->join_time = $join;
+        $row->leave_time = $join + $duration;
+        $row->duration = $duration;
+        $row->name = $name;
+        $row->detailsid = $detailsid;
+        $DB->insert_record('zoomyt_meeting_participants', $row);
+    }
+
+    /**
+     * Aggregate grading across multiple sessions: time-weighted duration, entry proportion,
+     * non-attendance scored as 0, and manual overrides preserved.
+     * @return void
+     */
+    public function test_recalculate_aggregate_grades_multisession(): void {
+        global $DB;
+        $this->setAdminUser();
+        $this->preventResetByRollback(); // Messaging does not like transactions.
+        $sink = $this->redirectMessages();
+
+        $course = $this->getDataGenerator()->create_course();
+        $this->getDataGenerator()->create_and_enrol($course, 'editingteacher');
+
+        // Four students with different attendance profiles.
+        $userfull = $this->getDataGenerator()->create_and_enrol($course, 'student');
+        $userpartial = $this->getDataGenerator()->create_and_enrol($course, 'student');
+        $useronesession = $this->getDataGenerator()->create_and_enrol($course, 'student');
+        $userabsent = $this->getDataGenerator()->create_and_enrol($course, 'student');
+        $userids = [$userfull->id, $userpartial->id, $useronesession->id, $userabsent->id];
+
+        $generator = $this->getDataGenerator()->get_plugin_generator('mod_zoomyt');
+        $instance = $generator->create_instance([
+            'course' => $course->id,
+            'meeting_id' => 778899,
+            'grade' => 100,
+            'name' => 'zoom multi',
+            'exists_on_zoom' => ZOOM_MEETING_EXISTS,
+        ]);
+        $DB->set_field('zoomyt', 'grading_method', 'period', ['id' => $instance->id]);
+        $zoom = $DB->get_record('zoomyt', ['id' => $instance->id]);
+
+        // Two 60-minute sessions (total length 7200s).
+        $start1 = strtotime('2026-01-01T15:00:00Z');
+        $start2 = strtotime('2026-01-08T15:00:00Z');
+        $session1 = $this->insert_session($zoom->id, $start1, 3600, 'multiuuid1');
+        $session2 = $this->insert_session($zoom->id, $start2, 3600, 'multiuuid2');
+
+        // userfull: both sessions in full -> 7200s.
+        $this->insert_attendance($session1, $userfull->id, 'Full User', $start1, 3600);
+        $this->insert_attendance($session2, $userfull->id, 'Full User', $start2, 3600);
+        // userpartial: session 1 full, session 2 half -> 5400s (present in both sessions).
+        $this->insert_attendance($session1, $userpartial->id, 'Partial User', $start1, 3600);
+        $this->insert_attendance($session2, $userpartial->id, 'Partial User', $start2, 1800);
+        // useronesession: only session 1 in full -> 3600s (present in 1 of 2 sessions).
+        $this->insert_attendance($session1, $useronesession->id, 'One Session User', $start1, 3600);
+        // userabsent: no attendance at all.
+
+        // --- Attendance duration (time-weighted) ---
+        $this->meetingtask->recalculate_aggregate_grades($zoom);
+        $grades = grade_get_grades($course->id, 'mod', 'zoomyt', $zoom->id, $userids)->items[0]->grades;
+        $this->assertEquals(100, $grades[$userfull->id]->grade);       // 7200/7200.
+        $this->assertEquals(75, $grades[$userpartial->id]->grade);     // 5400/7200.
+        $this->assertEquals(50, $grades[$useronesession->id]->grade);  // 3600/7200.
+        $this->assertEquals(0, $grades[$userabsent->id]->grade);       // No attendance.
+
+        // --- Upon entry (proportion of sessions attended) ---
+        $DB->set_field('zoomyt', 'grading_method', 'entry', ['id' => $zoom->id]);
+        $zoom = $DB->get_record('zoomyt', ['id' => $instance->id]);
+        $this->meetingtask->recalculate_aggregate_grades($zoom);
+        $grades = grade_get_grades($course->id, 'mod', 'zoomyt', $zoom->id, $userids)->items[0]->grades;
+        $this->assertEquals(100, $grades[$userfull->id]->grade);       // 2/2 sessions.
+        $this->assertEquals(100, $grades[$userpartial->id]->grade);    // 2/2 sessions (present, even if partial).
+        $this->assertEquals(50, $grades[$useronesession->id]->grade);  // 1/2 sessions.
+        $this->assertEquals(0, $grades[$userabsent->id]->grade);       // 0/2 sessions.
+
+        // --- Manual override is preserved ---
+        $DB->set_field('zoomyt', 'grading_method', 'period', ['id' => $zoom->id]);
+        $zoom = $DB->get_record('zoomyt', ['id' => $instance->id]);
+        $gradeitem = \grade_item::fetch([
+            'itemmodule' => 'zoomyt',
+            'iteminstance' => $zoom->id,
+            'courseid' => $course->id,
+        ]);
+        $gradeitem->update_final_grade($userpartial->id, 88, 'manual');
+
+        $this->meetingtask->recalculate_aggregate_grades($zoom);
+        $grades = grade_get_grades($course->id, 'mod', 'zoomyt', $zoom->id, $userids)->items[0]->grades;
+        // Overridden user keeps the manual grade; everyone else recomputes to the duration aggregate.
+        $this->assertEquals(88, $grades[$userpartial->id]->grade);
+        $this->assertEquals(100, $grades[$userfull->id]->grade);
+        $this->assertEquals(50, $grades[$useronesession->id]->grade);
+        $this->assertEquals(0, $grades[$userabsent->id]->grade);
+
+        // --- Dry run computes without writing ---
+        // useronesession currently has 50 on disk; switch to entry where it would also be 50, but
+        // verify that a dry run never alters any stored grade regardless.
+        $before = grade_get_grades($course->id, 'mod', 'zoomyt', $zoom->id, $userids)->items[0]->grades;
+        $report = $this->meetingtask->recalculate_aggregate_grades($zoom, true);
+        $this->assertIsArray($report);
+        $after = grade_get_grades($course->id, 'mod', 'zoomyt', $zoom->id, $userids)->items[0]->grades;
+        foreach ($userids as $uid) {
+            $this->assertEquals($before[$uid]->grade, $after[$uid]->grade);
+        }
+
+        $sink->close();
     }
 }

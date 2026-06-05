@@ -45,6 +45,12 @@ class youtube_service {
     /** @var string YouTube upload URL */
     const UPLOAD_URL = 'https://www.googleapis.com/upload/youtube/v3/videos';
 
+    /** @var string YouTube audio tracks resumable upload URL */
+    const AUDIOTRACK_UPLOAD_URL = 'https://www.googleapis.com/upload/youtube/v3/audiotracks';
+
+    /** @var string YouTube audio tracks API URL */
+    const AUDIOTRACK_API_URL = 'https://www.googleapis.com/youtube/v3/audiotracks';
+
     /** @var string Client ID */
     protected $clientid;
 
@@ -353,6 +359,8 @@ class youtube_service {
      * @param string $description Video description.
      * @param string $visibility Visibility: public, unlisted, private.
      * @param callable|null $progresscallback Optional callback for progress updates.
+     * @param string|null $primarylanguage Optional BCP-47 language designation for the
+     *                                      video's default language and default audio track.
      * @return object Video info with id, url, etc.
      * @throws \moodle_exception On error.
      */
@@ -361,7 +369,8 @@ class youtube_service {
         string $title,
         string $description = '',
         string $visibility = 'unlisted',
-        ?callable $progresscallback = null
+        ?callable $progresscallback = null,
+        ?string $primarylanguage = null
     ): object {
         if (!file_exists($filepath)) {
             throw new \moodle_exception('youtube_file_not_found', 'zoomyt', '', $filepath);
@@ -371,12 +380,18 @@ class youtube_service {
         $filesize = filesize($filepath);
 
         // Step 1: Initialize resumable upload.
+        $snippet = [
+            'title' => substr($title, 0, 100),
+            'description' => substr($description, 0, 5000),
+            'categoryId' => '27', // Education category.
+        ];
+        if (!empty($primarylanguage)) {
+            // Designate the language for the video and its default (floor) audio track.
+            $snippet['defaultLanguage'] = $primarylanguage;
+            $snippet['defaultAudioLanguage'] = $primarylanguage;
+        }
         $metadata = [
-            'snippet' => [
-                'title' => substr($title, 0, 100),
-                'description' => substr($description, 0, 5000),
-                'categoryId' => '27', // Education category.
-            ],
+            'snippet' => $snippet,
             'status' => [
                 'privacyStatus' => $visibility,
                 'selfDeclaredMadeForKids' => false,
@@ -471,6 +486,198 @@ class youtube_service {
             'thumbnail_url' => $videoinfo->thumbnail_url ?? '',
             'duration' => $videoinfo->duration ?? 0,
         ];
+    }
+
+    /**
+     * List the alternate audio tracks attached to a video.
+     *
+     * Uses the YouTube Data API v3 audiotracks resource. Returns an empty array
+     * if the channel is not enrolled in the multi-language audio feature.
+     *
+     * @param string $videoid YouTube video ID.
+     * @return array Array of ['id' => ..., 'language' => ..., 'name' => ...].
+     * @throws \moodle_exception On a non-eligibility API error.
+     */
+    public function list_audio_tracks(string $videoid): array {
+        $token = $this->get_access_token();
+
+        $curl = new \curl();
+        $curl->setHeader('Authorization: Bearer ' . $token);
+
+        $url = self::AUDIOTRACK_API_URL . '?part=id,snippet&videoId=' . urlencode($videoid);
+        $response = $curl->get($url);
+
+        if ($curl->get_errno()) {
+            throw new \moodle_exception('youtube_api_error', 'zoomyt', '', $curl->error);
+        }
+
+        $result = json_decode($response);
+
+        if (isset($result->error)) {
+            $message = $result->error->message ?? 'Unknown error';
+            // Not enrolled / feature not available: treat as "no tracks" rather than fatal.
+            if (in_array((int) ($result->error->code ?? 0), [403, 404], true)) {
+                return [];
+            }
+            throw new \moodle_exception('youtube_api_error', 'zoomyt', '', $message);
+        }
+
+        $tracks = [];
+        if (!empty($result->items)) {
+            foreach ($result->items as $item) {
+                $tracks[] = [
+                    'id' => $item->id ?? '',
+                    'language' => $item->snippet->audioTrack->language ?? ($item->snippet->language ?? ''),
+                    'name' => $item->snippet->name ?? '',
+                ];
+            }
+        }
+
+        return $tracks;
+    }
+
+    /**
+     * Attach an alternate (dubbed) audio track to a video.
+     *
+     * Performs a resumable media upload of an audio-only file to the YouTube
+     * Data API v3 audiotracks resource.
+     *
+     * @param string $videoid YouTube video ID.
+     * @param string $filepath Path to the audio-only file (AAC/M4A).
+     * @param string $languagecode BCP-47 language code (e.g. "pt", "es-MX").
+     * @param string $name Optional display name for the track.
+     * @return object ['id' => audiotrack id, 'language' => code].
+     * @throws \moodle_exception On error.
+     */
+    public function upload_audio_track(
+        string $videoid,
+        string $filepath,
+        string $languagecode,
+        string $name = ''
+    ): object {
+        if (!file_exists($filepath)) {
+            throw new \moodle_exception('youtube_file_not_found', 'zoomyt', '', $filepath);
+        }
+
+        $token = $this->get_access_token();
+        $filesize = filesize($filepath);
+
+        $metadata = ['snippet' => []];
+        if ($name !== '') {
+            $metadata['snippet']['name'] = substr($name, 0, 100);
+        }
+
+        // Step 1: Initialize resumable upload.
+        $curl = new \curl();
+        $curl->setHeader('Authorization: Bearer ' . $token);
+        $curl->setHeader('Content-Type: application/json; charset=UTF-8');
+        $curl->setHeader('X-Upload-Content-Length: ' . $filesize);
+        $curl->setHeader('X-Upload-Content-Type: audio/mp4');
+
+        $initurl = self::AUDIOTRACK_UPLOAD_URL
+            . '?uploadType=resumable&part=snippet'
+            . '&videoId=' . urlencode($videoid)
+            . '&language=' . urlencode($languagecode);
+
+        $response = $curl->post($initurl, json_encode($metadata));
+        $info = $curl->get_info();
+
+        if ((int) ($info['http_code'] ?? 0) !== 200) {
+            $error = json_decode($response);
+            throw new \moodle_exception('youtube_audiotrack_init_error', 'zoomyt', '',
+                $error->error->message ?? 'HTTP ' . ($info['http_code'] ?? '0'));
+        }
+
+        $headers = $curl->getResponse();
+        $uploadurl = $headers['location'] ?? $headers['Location'] ?? null;
+        if (empty($uploadurl)) {
+            throw new \moodle_exception('youtube_upload_no_location', 'zoomyt');
+        }
+
+        // Step 2: Upload the audio file in chunks.
+        $handle = fopen($filepath, 'rb');
+        if (!$handle) {
+            throw new \moodle_exception('youtube_file_open_error', 'zoomyt', '', $filepath);
+        }
+
+        $chunksize = 10 * 1024 * 1024;
+        $uploaded = 0;
+        $response = '';
+
+        while (!feof($handle)) {
+            $chunk = fread($handle, $chunksize);
+            $chunklen = strlen($chunk);
+            $end = $uploaded + $chunklen - 1;
+
+            $curl = new \curl();
+            $curl->setHeader('Authorization: Bearer ' . $token);
+            $curl->setHeader('Content-Type: audio/mp4');
+            $curl->setHeader('Content-Length: ' . $chunklen);
+            $curl->setHeader('Content-Range: bytes ' . $uploaded . '-' . $end . '/' . $filesize);
+
+            $response = $curl->put($uploadurl, $chunk);
+            $info = $curl->get_info();
+            $uploaded += $chunklen;
+
+            $code = (int) ($info['http_code'] ?? 0);
+            if ($code !== 308 && $code !== 200 && $code !== 201) {
+                fclose($handle);
+                $error = json_decode($response);
+                throw new \moodle_exception('youtube_audiotrack_upload_error', 'zoomyt', '',
+                    $error->error->message ?? 'HTTP ' . $code);
+            }
+
+            if ($code === 200 || $code === 201) {
+                break;
+            }
+        }
+
+        fclose($handle);
+
+        $result = json_decode($response);
+        if (isset($result->error)) {
+            throw new \moodle_exception('youtube_audiotrack_upload_error', 'zoomyt', '', $result->error->message);
+        }
+
+        return (object) [
+            'id' => $result->id ?? '',
+            'language' => $languagecode,
+        ];
+    }
+
+    /**
+     * Delete an alternate audio track from a video.
+     *
+     * @param string $audiotrackid The audioTrack resource id.
+     * @return bool True on success (404 treated as already gone).
+     * @throws \moodle_exception On a non-recoverable API error.
+     */
+    public function delete_audio_track(string $audiotrackid): bool {
+        $token = $this->get_access_token();
+
+        $curl = new \curl();
+        $curl->setHeader('Authorization: Bearer ' . $token);
+
+        $url = self::AUDIOTRACK_API_URL . '?id=' . urlencode($audiotrackid);
+        $response = $curl->delete($url);
+
+        if ($curl->get_errno()) {
+            throw new \moodle_exception('youtube_api_error', 'zoomyt', '', $curl->error);
+        }
+
+        $httpcode = (int) ($curl->get_info()['http_code'] ?? 0);
+        if (in_array($httpcode, [200, 204, 404], true)) {
+            return true;
+        }
+
+        $message = 'HTTP ' . $httpcode;
+        if (!empty($response)) {
+            $decoded = json_decode($response);
+            if (isset($decoded->error->message)) {
+                $message = $decoded->error->message;
+            }
+        }
+        throw new \moodle_exception('youtube_api_error', 'zoomyt', '', $message);
     }
 
     /**

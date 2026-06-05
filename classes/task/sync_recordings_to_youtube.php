@@ -118,6 +118,9 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
         // Sync transcripts for uploaded videos that don't have them yet.
         $this->sync_transcripts($instanceid);
 
+        // Synthesize and attach per-language interpretation audio tracks.
+        $this->process_pending_audiotracks($instanceid);
+
         // Clean up old Zoom recordings.
         $this->cleanup_old_zoom_recordings();
 
@@ -254,7 +257,7 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
 
         // Exclude recordings that already have a successfully uploaded video.
         $sql = "SELECT zmr.*, z.id as zoomid, z.course, z.name as session_name,
-                       zmd.start_time as session_time
+                       z.yt_primary_language, zmd.start_time as session_time
                 FROM {zoomyt_meeting_recordings} zmr
                 JOIN {zoomyt} z ON z.id = zmr.zoomid
                 JOIN {zoomyt_meeting_details} zmd ON zmd.uuid = zmr.meetinguuid
@@ -413,11 +416,14 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
         // Upload to YouTube.
         mtrace('  Uploading to YouTube...');
         try {
+            $primarylanguage = $this->resolve_primary_language($recording);
             $result = $ytservice->upload_video(
                 $localpath,
                 $video->title,
                 $video->description,
-                $video->visibility
+                $video->visibility,
+                null,
+                $primarylanguage
             );
 
             $video->youtube_video_id = $result->id;
@@ -565,6 +571,285 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
             $video->timemodified = time();
             $DB->update_record('zoomyt_videos', $video);
         }
+    }
+
+    /**
+     * Resolve the BCP-47 primary language designation for a recording's video.
+     *
+     * Uses the activity's yt_primary_language override if set, otherwise the
+     * course language, otherwise the site default language.
+     *
+     * @param object $recording Recording row (must include yt_primary_language, course).
+     * @return string|null BCP-47 language code, or null if none could be resolved.
+     */
+    protected function resolve_primary_language(object $recording): ?string {
+        global $CFG, $DB;
+        require_once($CFG->dirroot . '/mod/zoomyt/locallib.php');
+
+        $lang = trim((string) ($recording->yt_primary_language ?? ''));
+
+        if ($lang === '') {
+            // Fall back to the course language.
+            $courselang = $DB->get_field('course', 'lang', ['id' => $recording->course]);
+            $lang = trim((string) $courselang);
+        }
+
+        if ($lang === '') {
+            // Fall back to the site default language.
+            $lang = !empty($CFG->lang) ? $CFG->lang : 'en';
+        }
+
+        return zoomyt_moodle_lang_to_bcp47($lang);
+    }
+
+    /** @var int Maximum audio tracks to synthesize/attach per run. */
+    const MAX_AUDIOTRACKS_PER_RUN = 5;
+
+    /**
+     * Synthesize per-language interpretation audio tracks and attach them to the
+     * uploaded YouTube videos.
+     *
+     * @param int|null $instanceid Specific zoom instance ID, or null for all.
+     */
+    protected function process_pending_audiotracks(?int $instanceid = null): void {
+        global $CFG, $DB;
+
+        if (empty(get_config('zoomyt', 'enable_multilang_audio'))) {
+            return;
+        }
+
+        require_once($CFG->dirroot . '/mod/zoomyt/locallib.php');
+        require_once($CFG->dirroot . '/mod/zoomyt/classes/audio_processor.php');
+        require_once($CFG->dirroot . '/mod/zoomyt/classes/youtube_service.php');
+
+        $processor = new \mod_zoomyt\audio_processor();
+        if (!$processor->is_available()) {
+            mtrace('Skipping audio tracks: ffmpeg/ffprobe not available.');
+            return;
+        }
+
+        mtrace('Checking for interpretation audio tracks to build...');
+
+        // Find uploaded videos that have interpretation recordings for their meeting.
+        $params = [];
+        $instancesql = '';
+        if ($instanceid !== null) {
+            $instancesql = ' AND zyv.zoomid = :zoomid';
+            $params['zoomid'] = $instanceid;
+        }
+
+        $sql = "SELECT DISTINCT zyv.*
+                  FROM {zoomyt_videos} zyv
+                  JOIN {zoomyt_meeting_recordings} zmr
+                    ON zmr.zoomid = zyv.zoomid
+                   AND zmr.meetinguuid = zyv.meetinguuid
+                   AND zmr.recordingtype = :interptype
+                 WHERE zyv.status = 'uploaded'
+                   AND zyv.youtube_video_id IS NOT NULL
+                   $instancesql
+              ORDER BY zyv.timecreated DESC";
+        $params['interptype'] = 'audio_interpretation';
+
+        $videos = $DB->get_records_sql($sql, $params, 0, 20);
+        if (empty($videos)) {
+            mtrace('No videos need interpretation audio tracks.');
+            return;
+        }
+
+        $tempdir = $this->get_temp_directory();
+        if (!$tempdir) {
+            mtrace('Skipping audio tracks: temp directory not available.');
+            return;
+        }
+
+        $built = 0;
+        foreach ($videos as $video) {
+            if ($built >= self::MAX_AUDIOTRACKS_PER_RUN) {
+                mtrace('Reached maximum audio tracks per run limit.');
+                break;
+            }
+            try {
+                $built += $this->build_audiotracks_for_video($video, $processor, $tempdir,
+                    self::MAX_AUDIOTRACKS_PER_RUN - $built);
+            } catch (\Exception $e) {
+                mtrace('  ERROR building audio tracks for video ' . $video->id . ': ' . $e->getMessage());
+            }
+        }
+
+        mtrace('Built ' . $built . ' interpretation audio tracks.');
+    }
+
+    /**
+     * Build and attach interpretation audio tracks for one uploaded video.
+     *
+     * @param object $video The zoomyt_videos row.
+     * @param \mod_zoomyt\audio_processor $processor The ffmpeg processor.
+     * @param string $tempdir Temp directory for downloads/outputs.
+     * @param int $limit Maximum number of tracks to build in this call.
+     * @return int Number of tracks successfully attached.
+     */
+    protected function build_audiotracks_for_video(object $video, \mod_zoomyt\audio_processor $processor,
+            string $tempdir, int $limit): int {
+        global $DB;
+
+        $zoom = $DB->get_record('zoomyt', ['id' => $video->zoomid]);
+        if (!$zoom) {
+            return 0;
+        }
+
+        $ytservice = \mod_zoomyt\youtube_service::get_instance_for_activity($video->zoomid);
+        if (!$ytservice || !$ytservice->is_configured()) {
+            return 0;
+        }
+
+        // Interpretation recordings for this session.
+        $interprecordings = $DB->get_records('zoomyt_meeting_recordings', [
+            'zoomid' => $video->zoomid,
+            'meetinguuid' => $video->meetinguuid,
+            'recordingtype' => 'audio_interpretation',
+        ], 'recordingstart ASC');
+
+        if (empty($interprecordings)) {
+            return 0;
+        }
+
+        // Determine the floor audio source: prefer audio_only, else the uploaded video recording.
+        $floorrecording = $DB->get_record('zoomyt_meeting_recordings', [
+            'zoomid' => $video->zoomid,
+            'meetinguuid' => $video->meetinguuid,
+            'recordingtype' => 'audio_only',
+        ]);
+        if (!$floorrecording && !empty($video->recordingid)) {
+            $floorrecording = $DB->get_record('zoomyt_meeting_recordings', ['id' => $video->recordingid]);
+        }
+        if (!$floorrecording) {
+            mtrace('  No floor audio source for video ' . $video->id . ', skipping.');
+            return 0;
+        }
+
+        // Candidate languages configured on the activity (used when Zoom does not
+        // expose the language on the recording file).
+        $candidatelangs = zoomyt_get_activity_interpretation_languages($zoom);
+        $primarylang = $this->resolve_primary_language((object) [
+            'yt_primary_language' => $zoom->yt_primary_language ?? null,
+            'course' => $zoom->course,
+        ]);
+        // The floor (default) track already carries the primary language; alternate
+        // tracks should be the other configured languages.
+        $candidatelangs = array_values(array_diff($candidatelangs, [$primarylang]));
+
+        $floorpath = $tempdir . '/zoomyt_floor_' . $video->id . '.src';
+        $havefloor = false;
+        $built = 0;
+
+        try {
+            foreach ($interprecordings as $interp) {
+                if ($built >= $limit) {
+                    break;
+                }
+
+                // Resolve the language for this interpretation recording.
+                $lang = trim((string) ($interp->language ?? ''));
+                if ($lang === '') {
+                    if (count($interprecordings) === 1 && count($candidatelangs) === 1) {
+                        $lang = $candidatelangs[0];
+                    }
+                }
+                if ($lang === '') {
+                    mtrace('  Cannot determine language for interpretation recording ' . $interp->id .
+                        ' (assign it manually); skipping.');
+                    continue;
+                }
+
+                // Skip if this track is already attached.
+                $existing = $DB->get_record('zoomyt_video_audiotracks',
+                    ['videoid' => $video->id, 'language' => $lang]);
+                if ($existing && $existing->status === 'attached') {
+                    continue;
+                }
+
+                $track = $existing ?: (object) [
+                    'videoid' => $video->id,
+                    'language' => $lang,
+                    'source_recordingid' => $interp->id,
+                    'status' => 'pending',
+                    'timecreated' => time(),
+                ];
+                $track->source_recordingid = $interp->id;
+                $track->status = 'synthesizing';
+                $track->error_message = null;
+                $track->timemodified = time();
+                if (!empty($track->id)) {
+                    $DB->update_record('zoomyt_video_audiotracks', $track);
+                } else {
+                    $track->id = $DB->insert_record('zoomyt_video_audiotracks', $track);
+                }
+
+                // Download the floor source once.
+                if (!$havefloor) {
+                    mtrace('  Downloading floor audio for video ' . $video->id . '...');
+                    $this->download_zoom_recording($floorrecording, $floorpath);
+                    $havefloor = true;
+                }
+
+                // Download the interpreter track.
+                $interppath = $tempdir . '/zoomyt_interp_' . $interp->id . '.m4a';
+                mtrace('  Downloading interpreter (' . $lang . ') for recording ' . $interp->id . '...');
+                $this->download_zoom_recording($interp, $interppath);
+
+                // Synthesize the ducked language track.
+                $outpath = $tempdir . '/zoomyt_track_' . $video->id . '_' . $lang . '.m4a';
+                $offset = (float) (($interp->recordingstart ?? 0) - ($floorrecording->recordingstart ?? 0));
+                mtrace('  Synthesizing ' . $lang . ' track (offset ' . $offset . 's)...');
+
+                $ok = $processor->synthesize_ducked_track($floorpath, $interppath, $outpath, $offset);
+
+                if (!$ok) {
+                    $track->status = 'failed';
+                    $track->error_message = 'ffmpeg synthesis failed';
+                    $track->timemodified = time();
+                    $DB->update_record('zoomyt_video_audiotracks', $track);
+                    @unlink($interppath);
+                    continue;
+                }
+
+                // Attach to YouTube.
+                $track->status = 'uploading';
+                $track->timemodified = time();
+                $DB->update_record('zoomyt_video_audiotracks', $track);
+
+                try {
+                    mtrace('  Attaching ' . $lang . ' audio track to YouTube...');
+                    $result = $ytservice->upload_audio_track($video->youtube_video_id, $outpath, $lang);
+                    $track->youtube_audiotrack_id = $result->id;
+                    $track->status = 'attached';
+                    $track->error_message = null;
+                    $track->timemodified = time();
+                    $DB->update_record('zoomyt_video_audiotracks', $track);
+                    $built++;
+                    mtrace('  Attached ' . $lang . ' audio track.');
+                } catch (\Exception $e) {
+                    $track->status = 'failed';
+                    $track->error_message = 'Attach failed: ' . $e->getMessage();
+                    $track->timemodified = time();
+                    $DB->update_record('zoomyt_video_audiotracks', $track);
+                    mtrace('  Attach failed for ' . $lang . ': ' . $e->getMessage());
+                } finally {
+                    if (file_exists($outpath)) {
+                        @unlink($outpath);
+                    }
+                    if (file_exists($interppath)) {
+                        @unlink($interppath);
+                    }
+                }
+            }
+        } finally {
+            if (file_exists($floorpath)) {
+                @unlink($floorpath);
+            }
+        }
+
+        return $built;
     }
 
     /**

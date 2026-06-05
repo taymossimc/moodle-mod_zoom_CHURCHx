@@ -56,6 +56,7 @@
         <FIELD NAME="yt_channel_name" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Activity-specific YouTube channel name for display"/>
         <FIELD NAME="yt_refresh_token" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="Activity-specific YouTube OAuth refresh token"/>
         <FIELD NAME="yt_default_visibility" TYPE="char" LENGTH="20" NOTNULL="false" DEFAULT="unlisted" SEQUENCE="false" COMMENT="Activity-specific YouTube visibility: public, unlisted, private"/>
+        <FIELD NAME="yt_primary_language" TYPE="char" LENGTH="20" NOTNULL="false" SEQUENCE="false" COMMENT="Primary language designation (Moodle lang code) used for the YouTube upload's default language/audio. NULL means use the course language."/>
         <FIELD NAME="interpretation_enable" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Enable Zoom language interpretation for this meeting."/>
         <FIELD NAME="interpretation_data" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="JSON array of interpreters: email, languages."/>
         <FIELD NAME="sign_interpretation_enable" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Enable Zoom sign language interpretation."/>
@@ -135,6 +136,7 @@
         <FIELD NAME="externalurl" TYPE="text" NOTNULL="true" SEQUENCE="false" COMMENT="Link to view the recording."/>
         <FIELD NAME="passcode" TYPE="char" LENGTH="30" NOTNULL="false" SEQUENCE="false" COMMENT="Passcode to access the recording."/>
         <FIELD NAME="recordingtype" TYPE="char" LENGTH="50" NOTNULL="true" SEQUENCE="false" COMMENT="Type of recording."/>
+        <FIELD NAME="language" TYPE="char" LENGTH="20" NOTNULL="false" SEQUENCE="false" COMMENT="Interpretation language for audio_interpretation recordings (BCP-47 or Zoom-provided code). NULL for non-interpretation recordings."/>
         <FIELD NAME="recordingstart" TYPE="int" LENGTH="12" NOTNULL="true" SEQUENCE="false"/>
         <FIELD NAME="showrecording" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="12" NOTNULL="false" SEQUENCE="false" COMMENT="Timestamp when the record was created."/>
@@ -278,6 +280,28 @@
       <INDEXES>
         <INDEX NAME="youtube_video_id_idx" UNIQUE="true" FIELDS="youtube_video_id"/>
         <INDEX NAME="meetinguuid_idx" UNIQUE="false" FIELDS="meetinguuid"/>
+        <INDEX NAME="status_idx" UNIQUE="false" FIELDS="status"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="zoomyt_video_audiotracks" COMMENT="Per-language alternate audio tracks attached to a YouTube video (from Zoom interpretation).">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="videoid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Link to zoomyt_videos table."/>
+        <FIELD NAME="language" TYPE="char" LENGTH="20" NOTNULL="true" SEQUENCE="false" COMMENT="BCP-47 language code of the synthesized audio track."/>
+        <FIELD NAME="source_recordingid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Link to the zoomyt_meeting_recordings interpretation audio used to build this track."/>
+        <FIELD NAME="youtube_audiotrack_id" TYPE="char" LENGTH="100" NOTNULL="false" SEQUENCE="false" COMMENT="YouTube audioTrack resource id once attached."/>
+        <FIELD NAME="status" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="pending" SEQUENCE="false" COMMENT="pending, synthesizing, uploading, attached, failed."/>
+        <FIELD NAME="error_message" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="Error message if status is failed."/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="12" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="12" NOTNULL="true" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="id_primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="fk_videoid" TYPE="foreign" FIELDS="videoid" REFTABLE="zoomyt_videos" REFFIELDS="id"/>
+        <KEY NAME="fk_source_recordingid" TYPE="foreign" FIELDS="source_recordingid" REFTABLE="zoomyt_meeting_recordings" REFFIELDS="id"/>
+        <KEY NAME="videoid_language_unique" TYPE="unique" FIELDS="videoid, language"/>
+      </KEYS>
+      <INDEXES>
         <INDEX NAME="status_idx" UNIQUE="false" FIELDS="status"/>
       </INDEXES>
     </TABLE>

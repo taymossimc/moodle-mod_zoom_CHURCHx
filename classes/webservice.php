@@ -627,6 +627,26 @@ class webservice {
     }
 
     /**
+     * Gets the master account's settings.
+     *
+     * Reflects what the Zoom account is capable of, independent of any single
+     * user's current license. Useful when licenses are assigned dynamically at
+     * meeting time, so configuration should expose everything the account allows.
+     *
+     * @param string|null $option Optional settings section, e.g. 'recording'.
+     * @return stdClass The call's result in JSON format.
+     */
+    public function get_account_settings($option = null) {
+        // Classic: account:read:admin.
+        // Granular: account:read:settings:admin.
+        $url = 'accounts/me/settings';
+        if ($option !== null) {
+            $url .= '?option=' . urlencode($option);
+        }
+        return $this->make_call($url);
+    }
+
+    /**
      * Gets the user's meeting security settings, including password requirements.
      *
      * @param string $userid The user's ID.

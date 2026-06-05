@@ -26,6 +26,8 @@
 - **View Tracking**: Track which students have viewed each video
 - **Automatic Cleanup**: Optionally delete Zoom cloud recordings after YouTube upload
 - **Manual Sync Buttons**: Trigger recording sync and YouTube upload on demand
+- **Primary Language Designation**: Per-activity dropdown to set the YouTube video's default language/audio (defaults to the course language)
+- **Multi-Language Interpretation Audio**: Synthesizes a per-language audio mix from Zoom's language interpretation recordings (room audio ducked under the interpreter voice) and attaches them as alternate YouTube audio tracks (requires ffmpeg; see below)
 
 ### Meeting Access Control
 - **Host/Teacher Early Access**: Hosts and teachers can start/join meetings early (default: 15 minutes before)
@@ -322,6 +324,24 @@ If your Google Cloud app is in testing mode, add your Google account as a test u
 - PHP 7.2 or higher
 - Zoom Educational or Business account
 - YouTube channel with API access (for YouTube features)
+- **ffmpeg and ffprobe** (only for the Multi-Language Interpretation Audio feature) — must be installed on the Moodle server and available on the system `PATH` (or set explicit paths in the plugin settings). On Debian/Ubuntu: `sudo apt-get install ffmpeg`.
+
+## Multi-Language Interpretation Audio
+
+When a Zoom meeting uses live language interpretation, each language channel can be recorded as a separate, isolated interpreter-voice file (enable **"Record language interpreter"** in the Zoom account's Recording settings *before* the meeting — it is not retroactive).
+
+When **Enable multi-language audio tracks** is turned on in the plugin settings, the YouTube sync task will, for each interpretation language:
+
+1. Download the floor (room) audio and the isolated interpreter track from the Zoom cloud recording.
+2. Use ffmpeg sidechain ducking to build a "<language> version": the room audio plays normally and is automatically attenuated whenever the interpreter speaks, with the interpreter mixed on top.
+3. Attach the result to the uploaded YouTube video as an alternate audio track (YouTube Data API v3 `audiotracks`), so viewers can switch languages in the player.
+
+Notes and limitations:
+
+- The YouTube channel must be eligible for **multi-language audio** (an "advanced features" capability rolled out gradually by YouTube). If the channel is not eligible, audio tracks cannot be attached and the track status will show as failed.
+- Embedding multiple audio streams directly in the uploaded MP4 does **not** work — YouTube keeps only the primary track. Alternate tracks must be attached via the API, which this feature does automatically.
+- Zoom's recording API does not label the language of an interpretation file. When a single interpretation language is configured on the activity it is matched automatically; with multiple languages the recording's language must be assigned (see the language column on `zoomyt_meeting_recordings`).
+- Ducking behavior (threshold, ratio, attack, release) is configurable in the plugin settings.
 
 ## Planned Features / Roadmap
 

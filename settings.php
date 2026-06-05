@@ -903,4 +903,66 @@ if ($ADMIN->fulltree) {
         '5368709120',
         $storagelimitoptions
     ));
+
+    // Multi-language interpretation audio (ffmpeg-based).
+    $settings->add(new admin_setting_heading(
+        'zoomyt/multilangaudiosettings',
+        get_string('multilang_audio_settings', 'zoomyt'),
+        get_string('multilang_audio_settings_desc', 'zoomyt')
+    ));
+
+    $settings->add(new admin_setting_configcheckbox(
+        'zoomyt/enable_multilang_audio',
+        get_string('enable_multilang_audio', 'zoomyt'),
+        get_string('enable_multilang_audio_desc', 'zoomyt'),
+        0
+    ));
+
+    $settings->add(new admin_setting_configtext(
+        'zoomyt/ffmpeg_path',
+        get_string('ffmpeg_path', 'zoomyt'),
+        get_string('ffmpeg_path_desc', 'zoomyt'),
+        '',
+        PARAM_RAW_TRIMMED
+    ));
+
+    $settings->add(new admin_setting_configtext(
+        'zoomyt/ffprobe_path',
+        get_string('ffprobe_path', 'zoomyt'),
+        get_string('ffprobe_path_desc', 'zoomyt'),
+        '',
+        PARAM_RAW_TRIMMED
+    ));
+
+    $settings->add(new admin_setting_configtext(
+        'zoomyt/duck_threshold',
+        get_string('duck_threshold', 'zoomyt'),
+        get_string('duck_threshold_desc', 'zoomyt'),
+        '0.03',
+        PARAM_RAW_TRIMMED
+    ));
+
+    $settings->add(new admin_setting_configtext(
+        'zoomyt/duck_ratio',
+        get_string('duck_ratio', 'zoomyt'),
+        get_string('duck_ratio_desc', 'zoomyt'),
+        '8',
+        PARAM_RAW_TRIMMED
+    ));
+
+    $settings->add(new admin_setting_configtext(
+        'zoomyt/duck_attack',
+        get_string('duck_attack', 'zoomyt'),
+        get_string('duck_attack_desc', 'zoomyt'),
+        '5',
+        PARAM_RAW_TRIMMED
+    ));
+
+    $settings->add(new admin_setting_configtext(
+        'zoomyt/duck_release',
+        get_string('duck_release', 'zoomyt'),
+        get_string('duck_release_desc', 'zoomyt'),
+        '300',
+        PARAM_RAW_TRIMMED
+    ));
 }

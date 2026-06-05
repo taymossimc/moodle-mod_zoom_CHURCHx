@@ -366,6 +366,41 @@ echo html_writer::tag('button',
 );
 echo html_writer::end_div();
 
+// Multi-language interpretation audio track status (read-only summary).
+if (!empty(get_config('zoomyt', 'enable_multilang_audio'))) {
+    $tracksql = "SELECT zat.id, zat.language, zat.status, zat.error_message,
+                        zv.title, zv.youtube_video_id
+                   FROM {zoomyt_video_audiotracks} zat
+                   JOIN {zoomyt_videos} zv ON zv.id = zat.videoid
+                  WHERE zv.zoomid = ?
+               ORDER BY zv.timecreated DESC, zat.language ASC";
+    $audiotracks = $DB->get_records_sql($tracksql, [$zoom->id]);
+
+    if (!empty($audiotracks)) {
+        echo $OUTPUT->heading(get_string('audiotracks_heading', 'zoomyt'), 4);
+        $table = new html_table();
+        $table->head = [
+            get_string('video', 'zoomyt'),
+            get_string('language'),
+            get_string('status'),
+            get_string('error'),
+        ];
+        $table->attributes['class'] = 'generaltable';
+        foreach ($audiotracks as $track) {
+            $statusclass = $track->status === 'attached' ? 'badge-success'
+                : ($track->status === 'failed' ? 'badge-danger' : 'badge-secondary');
+            $statuscell = html_writer::tag('span', s($track->status), ['class' => 'badge ' . $statusclass]);
+            $table->data[] = [
+                format_string($track->title),
+                s($track->language),
+                $statuscell,
+                $track->status === 'failed' ? s($track->error_message) : '',
+            ];
+        }
+        echo html_writer::table($table);
+    }
+}
+
 // Add-YouTube-video modal (kept outside the videos block so it is always available).
 echo '
 <div class="modal fade" id="addVideoModal" tabindex="-1" role="dialog">

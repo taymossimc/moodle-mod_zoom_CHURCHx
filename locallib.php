@@ -516,6 +516,87 @@ function zoomyt_get_sign_languages(): array {
 }
 
 /**
+ * Map a Zoom interpretation language code (country-style, e.g. "US", "PT") to a
+ * BCP-47 language code suitable for YouTube audio tracks (e.g. "en", "pt").
+ *
+ * @param string $code Zoom interpretation code as used in interpretation_data.
+ * @return string|null BCP-47 code, or null if unknown.
+ */
+function zoomyt_interp_code_to_bcp47(string $code): ?string {
+    $map = [
+        'US' => 'en',
+        'CN' => 'zh',
+        'JP' => 'ja',
+        'DE' => 'de',
+        'FR' => 'fr',
+        'RU' => 'ru',
+        'PT' => 'pt',
+        'ES' => 'es',
+        'KR' => 'ko',
+    ];
+    $code = strtoupper(trim($code));
+    return $map[$code] ?? null;
+}
+
+/**
+ * Convert a Moodle language code (e.g. "en", "pt_br", "es_mx") to a BCP-47 code
+ * suitable for YouTube's defaultLanguage/defaultAudioLanguage and audio tracks
+ * (e.g. "en", "pt-BR", "es-MX").
+ *
+ * @param string $lang Moodle language code.
+ * @return string BCP-47 language code.
+ */
+function zoomyt_moodle_lang_to_bcp47(string $lang): string {
+    $lang = trim($lang);
+    if ($lang === '') {
+        return 'en';
+    }
+    // Strip Moodle's optional parent suffix, e.g. "en_us_wp" -> "en_us".
+    $parts = preg_split('/_/', $lang);
+    $primary = strtolower($parts[0]);
+    if (!empty($parts[1])) {
+        $region = strtoupper($parts[1]);
+        // Region must be 2 alpha (country) to be a valid BCP-47 region subtag.
+        if (preg_match('/^[A-Z]{2}$/', $region)) {
+            return $primary . '-' . $region;
+        }
+    }
+    return $primary;
+}
+
+/**
+ * Derive the distinct non-floor interpretation target languages (as BCP-47 codes)
+ * configured on a zoomyt activity, from its stored interpretation_data.
+ *
+ * Used to assign a language to an `audio_interpretation` recording when Zoom's
+ * recording API does not expose one. Only reliable when a single language is
+ * configured; callers should fall back to manual assignment otherwise.
+ *
+ * @param stdClass $zoom The zoomyt activity record.
+ * @return string[] Distinct BCP-47 language codes (may be empty).
+ */
+function zoomyt_get_activity_interpretation_languages(stdClass $zoom): array {
+    if (empty($zoom->interpretation_enable) || empty($zoom->interpretation_data)) {
+        return [];
+    }
+    $interpreters = json_decode($zoom->interpretation_data, true);
+    if (!is_array($interpreters)) {
+        return [];
+    }
+    $codes = [];
+    foreach ($interpreters as $interp) {
+        $languages = (string) ($interp['languages'] ?? '');
+        foreach (explode(',', $languages) as $code) {
+            $bcp = zoomyt_interp_code_to_bcp47($code);
+            if ($bcp !== null) {
+                $codes[$bcp] = true;
+            }
+        }
+    }
+    return array_keys($codes);
+}
+
+/**
  * Build the spoken-language interpreters array from the editor's row JSON.
  *
  * The form submits an array of `{email, lang_from, lang_to}` rows. Each row's
@@ -1762,14 +1843,29 @@ function zoomyt_load_meeting($id, $context, $usestarturl = true) {
             break;
     }
 
-    // Check if we should use the start meeting url.
-    // Teachers get the start_url (full host control) even if they're not the "real host"
-    // (e.g., when a fallback host account was used to create the meeting).
-    if (($userisrealhost || $isteacher) && $usestarturl) {
-        // Keep the legacy host rename for Zoom-side reporting (the meeting's host name
-        // in Zoom reports comes from the underlying account). It is best-effort and the
-        // uname URL parameter below is what guarantees the correct in-meeting name even
-        // if the API rename fails or hasn't propagated yet.
+    // Decide whether to launch via the host start_url or the regular join_url.
+    //
+    // A Zoom start_url embeds the host account's ZAK token, so whoever opens it
+    // joins the room AS the host Zoom account (taking on that account's display
+    // name). That is only correct when:
+    //   - the current user actually owns the meeting (their Zoom account is the
+    //     meeting host), or
+    //   - the meeting is owned by the shared fallback host account, which we rename
+    //     on the fly so the launching teacher's name is shown.
+    //
+    // Any other teacher (an alternative host on a meeting owned by a different real
+    // person - e.g. the colleague who created the activity) must use the join_url
+    // so they join as THEMSELVES, with host controls granted via the alternative
+    // host list, instead of impersonating the owner.
+    $fallbackhostid = zoomyt_get_fallback_host_id();
+    $hostisfallback = (!empty($fallbackhostid) && $zoom->host_id === $fallbackhostid);
+    $usehoststarturl = $usestarturl && ($userisrealhost || ($hostisfallback && $isteacher));
+
+    if ($usehoststarturl) {
+        // Keep the legacy host rename for Zoom-side reporting. This only affects the
+        // shared fallback host account (no-op for a real personal host) and is
+        // best-effort; the uname URL parameter is what guarantees the correct
+        // in-meeting name even if the API rename fails or hasn't propagated yet.
         zoomyt_rename_host_for_teacher($zoom->host_id, $USER);
         $starturl = zoomyt_get_start_url($zoom->meeting_id, $zoom->webinar, $zoom->join_url);
         $returns['nexturl'] = new moodle_url($starturl, ['uname' => $unamedisplay, 'uemail' => $USER->email]);
@@ -2024,6 +2120,76 @@ function zoomyt_get_user($identifier) {
     }
 
     return $users[$identifier];
+}
+
+/**
+ * Determine which auto-recording types are available for configuration.
+ *
+ * Because this plugin assigns Zoom licenses dynamically at meeting time, the
+ * configuration form should expose every recording type the *account* supports,
+ * not just what the editing/host user can currently do (they may be a Basic user
+ * when configuring, yet be granted a license when the session runs).
+ *
+ * Resolution order for each of local/cloud recording:
+ *   1. Master account settings (the ceiling of what the account allows).
+ *   2. The host user's individual settings (fallback for anything undetermined).
+ *   3. Default to available - the account may grant it at runtime.
+ *
+ * @param string|int|null $hostuserid Optional Zoom user id used as a fallback source.
+ * @return array{local: bool, cloud: bool}
+ */
+function zoomyt_get_recording_capabilities($hostuserid = null): array {
+    static $cache = [];
+    $key = (string) ($hostuserid ?? '');
+    if (isset($cache[$key])) {
+        return $cache[$key];
+    }
+
+    $local = null;
+    $cloud = null;
+
+    // 1. Account-level capability.
+    try {
+        $accountsettings = zoomyt_webservice()->get_account_settings('recording');
+        $rec = $accountsettings->recording ?? null;
+        if ($rec !== null) {
+            if (isset($rec->local_recording)) {
+                $local = !empty($rec->local_recording);
+            }
+            if (isset($rec->cloud_recording)) {
+                $cloud = !empty($rec->cloud_recording);
+            }
+        }
+    } catch (\Exception $e) {
+        debugging('ZoomYT: account recording settings unavailable: ' . $e->getMessage(), DEBUG_DEVELOPER);
+    }
+
+    // 2. Fall back to the host user's settings for anything still undetermined.
+    if (($local === null || $cloud === null) && !empty($hostuserid)) {
+        try {
+            $usersettings = zoomyt_get_user_settings($hostuserid);
+            $rec = $usersettings->recording ?? null;
+            if ($rec !== null) {
+                if ($local === null && isset($rec->local_recording)) {
+                    $local = !empty($rec->local_recording);
+                }
+                if ($cloud === null && isset($rec->cloud_recording)) {
+                    $cloud = !empty($rec->cloud_recording);
+                }
+            }
+        } catch (\Exception $e) {
+            debugging('ZoomYT: host recording settings unavailable: ' . $e->getMessage(), DEBUG_DEVELOPER);
+        }
+    }
+
+    // 3. Default undetermined capabilities to available.
+    $caps = [
+        'local' => $local === null ? true : $local,
+        'cloud' => $cloud === null ? true : $cloud,
+    ];
+
+    $cache[$key] = $caps;
+    return $caps;
 }
 
 /**

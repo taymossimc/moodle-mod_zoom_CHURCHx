@@ -56,10 +56,7 @@ $string['fallback_host_email'] = 'Fallback host email';
 $string['fallback_host_email_desc'] = 'Email of a licensed Zoom user on your account to use as the meeting host when a teacher\'s email is unavailable (e.g., registered on another Zoom organization or still pending invitation). The teacher will still join with full host control via the start URL, and the fallback account\'s display name will be temporarily changed to match the teacher\'s name.';
 $string['fallback_host_not_configured'] = 'Your email is not available on this Zoom account and no fallback host has been configured. Please contact your administrator.';
 $string['fallback_host_not_found'] = 'The configured fallback host email ({$a}) was not found on the Zoom account. Please contact your administrator.';
-$string['apiendpoint'] = 'Zoom API Endpoint';
 $string['apiendpoint_desc'] = 'Choose which Zoom API endpoint the Zoom activity will use to connect. The global API endpoint should work for all users. The European Union (EU) API endpoint is only intended for users who have a Zoom license with the EU provisioning option. If you are unsure, use the global API endpoint.';
-$string['apiendpoint_eu'] = 'EU API Endpoint';
-$string['apiendpoint_global'] = 'Global API Endpoint';
 $string['apiidentifier'] = 'Zoom API Identifier';
 $string['apiidentifier_desc'] = 'The identifier field to use when making a call to the Zoom API';
 $string['apiurl'] = 'Zoom API url';
@@ -87,8 +84,6 @@ $string['clientid'] = 'Zoom client ID';
 $string['clientid_desc'] = '';
 $string['clientsecret'] = 'Zoom client secret';
 $string['clientsecret_desc'] = '';
-$string['connectionfailed'] = 'Connection failed: ';
-$string['connectionok'] = 'Connection working.';
 $string['connectionsettings'] = 'Connection settings';
 $string['connectionsettings_desc'] = 'These settings define how Moodle connects to Zoom.';
 $string['connectionstatus'] = 'Connection status';
@@ -128,6 +123,7 @@ $string['err_duration_nonpositive'] = 'The duration must be positive.';
 $string['err_duration_too_long'] = 'The duration cannot exceed 150 hours.';
 $string['err_end_date'] = 'Recurrence end date cannot be in the past';
 $string['err_end_date_before_start'] = 'Recurrence end date cannot be before start date';
+$string['err_invalid_host'] = 'The selected meeting host is not a valid choice. Pick a course teacher who has a Zoom account.';
 $string['err_invalid_password'] = 'Passcode contains invalid characters.';
 $string['err_long_timeframe'] = 'Requested time frame too long, showing results of latest month in range.';
 $string['err_password'] = 'Passcode may only contain the following characters: [a-z A-Z 0-9 @ - _ *]. Max of 10 characters.';
@@ -195,6 +191,8 @@ Need manual grading: {$a->number}
 Graded users: {$a->graded + $a->alreadygraded}';
 $string['host'] = 'Host';
 $string['hostintro'] = '<a target="_blank" href="https://support.zoom.us/hc/en-us/articles/208220166">Alternative Hosts</a> can start Zoom meetings and manage the Waiting Room.';
+$string['meetinghost'] = 'Meeting host';
+$string['meetinghost_help'] = 'The Zoom account that owns this meeting. The host owns the meeting\'s cloud recordings and starts the session as themselves. You can choose any course teacher who has a Zoom account; it defaults to you. This cannot be changed once the meeting has been created.';
 $string['indicator:cognitivedepth'] = 'Zoom cognitive';
 $string['indicator:cognitivedepth_help'] = 'This indicator is based on the cognitive depth reached by the student in a Zoom activity.';
 $string['indicator:socialbreadth'] = 'Zoom social';
@@ -449,7 +447,6 @@ $string['starttime'] = 'Start time';
 $string['status'] = 'Status';
 $string['supplementaryfeaturessettings'] = 'Supplementary features settings';
 $string['supplementaryfeaturessettings_desc'] = 'These settings control if and how supplementary Zoom features are provided to the users.';
-$string['title'] = 'Title';
 $string['topic'] = 'Topic';
 $string['trackingfields'] = 'Tracking fields';
 $string['trackingfields_help'] = 'Enter the tracking field name(s)/label(s), separated by commas, to enable for Zoom activities.';
@@ -539,7 +536,6 @@ $string['youtube_site_default_channel_desc'] = 'The default YouTube channel for 
 $string['youtube_disconnect_confirm'] = 'Are you sure you want to disconnect this YouTube channel?';
 $string['youtube_disconnected'] = 'YouTube channel has been disconnected.';
 $string['yt_change_channel'] = 'Change Channel';
-$string['back_to_settings'] = 'Back to Zoom YT Settings';
 $string['youtube_category_channel_connected'] = 'Connected to: {$a}';
 $string['youtube_category_channel_not_connected'] = 'No channel connected for this category.';
 $string['youtube_manage_connection'] = 'Manage connection';
@@ -619,6 +615,33 @@ $string['temp_storage_limit_desc'] = 'Maximum disk space to use for temporary vi
 $string['insufficient_disk_space'] = 'Insufficient disk space for video download.';
 $string['cannot_create_file'] = 'Cannot create file: {$a}';
 $string['download_failed'] = 'Download failed: {$a}';
+
+// Multi-language interpretation audio.
+$string['multilang_audio_settings'] = 'Multi-language interpretation audio';
+$string['multilang_audio_settings_desc'] = 'Synthesize per-language audio tracks from Zoom language interpretation recordings and attach them to the YouTube video as alternate audio tracks. Requires ffmpeg/ffprobe installed on the server, the Zoom account setting "Record language interpreter" enabled before meetings, and a YouTube channel eligible for multi-language audio.';
+$string['enable_multilang_audio'] = 'Enable multi-language audio tracks';
+$string['enable_multilang_audio_desc'] = 'When enabled, the YouTube sync task will build a ducked audio mix (room audio under the interpreter voice) for each interpretation language and attach it to the uploaded video.';
+$string['ffmpeg_path'] = 'ffmpeg path';
+$string['ffmpeg_path_desc'] = 'Full path to the ffmpeg binary. Leave empty to auto-detect on the system PATH.';
+$string['ffprobe_path'] = 'ffprobe path';
+$string['ffprobe_path_desc'] = 'Full path to the ffprobe binary. Leave empty to auto-detect on the system PATH.';
+$string['duck_threshold'] = 'Ducking threshold';
+$string['duck_threshold_desc'] = 'Sidechain compressor threshold (linear amplitude, 0-1). Lower values duck the room audio more readily when the interpreter speaks. Default 0.03.';
+$string['duck_ratio'] = 'Ducking ratio';
+$string['duck_ratio_desc'] = 'Sidechain compressor ratio. Higher values reduce the room audio more strongly. Default 8.';
+$string['duck_attack'] = 'Ducking attack (ms)';
+$string['duck_attack_desc'] = 'How quickly the room audio is attenuated once the interpreter starts speaking. Default 5.';
+$string['duck_release'] = 'Ducking release (ms)';
+$string['duck_release_desc'] = 'How quickly the room audio returns after the interpreter stops speaking. Default 300.';
+$string['youtube_audiotrack_init_error'] = 'Failed to initialize YouTube audio track upload: {$a}';
+$string['youtube_audiotrack_upload_error'] = 'Failed to upload YouTube audio track: {$a}';
+$string['audiotracks_heading'] = 'Interpretation audio tracks';
+$string['video'] = 'Video';
+
+// Activity YouTube primary language.
+$string['yt_primary_language'] = 'YouTube primary language';
+$string['yt_primary_language_help'] = 'The language designation used for this activity\'s YouTube uploads (the video\'s default language and default audio track). Choose "Course default" to follow the course language, or override it here.';
+$string['yt_primary_language_coursedefault'] = 'Course default ({$a})';
 
 // Scheduled tasks.
 $string['task_sync_recordings_youtube'] = 'Sync Zoom recordings to YouTube';

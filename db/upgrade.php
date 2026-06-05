@@ -1805,5 +1805,46 @@ function xmldb_zoomyt_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026052900, 'zoomyt');
     }
 
+    if ($oldversion < 2026060500) {
+        // Add yt_primary_language to the zoomyt activity table.
+        $table = new xmldb_table('zoomyt');
+        $field = new xmldb_field('yt_primary_language', XMLDB_TYPE_CHAR, '20', null, null, null, null, 'yt_default_visibility');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Add language to recordings (interpretation audio language).
+        $rectable = new xmldb_table('zoomyt_meeting_recordings');
+        $recfield = new xmldb_field('language', XMLDB_TYPE_CHAR, '20', null, null, null, null, 'recordingtype');
+        if (!$dbman->field_exists($rectable, $recfield)) {
+            $dbman->add_field($rectable, $recfield);
+        }
+
+        // Create zoomyt_video_audiotracks table.
+        $attable = new xmldb_table('zoomyt_video_audiotracks');
+        if (!$dbman->table_exists($attable)) {
+            $attable->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+            $attable->add_field('videoid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+            $attable->add_field('language', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, null);
+            $attable->add_field('source_recordingid', XMLDB_TYPE_INTEGER, '10', null, null, null, null);
+            $attable->add_field('youtube_audiotrack_id', XMLDB_TYPE_CHAR, '100', null, null, null, null);
+            $attable->add_field('status', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, 'pending');
+            $attable->add_field('error_message', XMLDB_TYPE_TEXT, null, null, null, null, null);
+            $attable->add_field('timecreated', XMLDB_TYPE_INTEGER, '12', null, XMLDB_NOTNULL, null, null);
+            $attable->add_field('timemodified', XMLDB_TYPE_INTEGER, '12', null, XMLDB_NOTNULL, null, null);
+
+            $attable->add_key('id_primary', XMLDB_KEY_PRIMARY, ['id']);
+            $attable->add_key('fk_videoid', XMLDB_KEY_FOREIGN, ['videoid'], 'zoomyt_videos', ['id']);
+            $attable->add_key('fk_source_recordingid', XMLDB_KEY_FOREIGN, ['source_recordingid'],
+                'zoomyt_meeting_recordings', ['id']);
+            $attable->add_key('videoid_language_unique', XMLDB_KEY_UNIQUE, ['videoid', 'language']);
+            $attable->add_index('status_idx', XMLDB_INDEX_NOTUNIQUE, ['status']);
+
+            $dbman->create_table($attable);
+        }
+
+        upgrade_mod_savepoint(true, 2026060500, 'zoomyt');
+    }
+
     return true;
 }

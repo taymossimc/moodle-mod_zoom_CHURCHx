@@ -126,7 +126,17 @@ function zoomyt_add_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = null)
         $hostemail = null;
         if (!empty($zoom->schedule_for)) {
             $hostemail = $zoom->schedule_for;
-        } else {
+        } else if (!empty($zoom->host_id)) {
+            // The meeting host may be a teacher chosen at creation time (not the
+            // creator), so resolve the exclusion email from the actual host account.
+            try {
+                $hostzoomuser = zoomyt_get_user($zoom->host_id);
+                $hostemail = $hostzoomuser->email ?? null;
+            } catch (\Exception $e) {
+                $hostemail = null;
+            }
+        }
+        if (empty($hostemail)) {
             global $USER;
             $hostemail = zoomyt_get_api_identifier($USER);
         }

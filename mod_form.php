@@ -735,11 +735,13 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         // Add autorecording option if enabled.
         $allowrecordingchangeoption = $config->allowrecordingchangeoption;
         if ($allowrecordingchangeoption) {
-            // Add auto recording options according to user settings.
-            $options = [
-                ZOOM_AUTORECORDING_NONE => get_string('autorecording_none', 'mod_zoomyt'),
-            ];
+            // Expose every recording type the account supports (licenses are
+            // assigned dynamically at meeting time), not just the host user's
+            // current capability.
+            $options = $this->build_autorecording_options($hostuserid);
 
+            // The host user's own settings are still used to compute the default
+            // when the global option is "user default".
             $recordingsettings = null;
             if (!empty($hostuserid)) {
                 try {
@@ -750,14 +752,6 @@ class mod_zoomyt_mod_form extends moodleform_mod {
                 } catch (\Exception $e) {
                     debugging('Could not get Zoom user settings for recording options: ' . $e->getMessage(), DEBUG_DEVELOPER);
                 }
-            }
-
-            if (!empty($recordingsettings) && !empty($recordingsettings->local_recording)) {
-                $options[ZOOM_AUTORECORDING_LOCAL] = get_string('autorecording_local', 'mod_zoomyt');
-            }
-
-            if (!empty($recordingsettings) && !empty($recordingsettings->cloud_recording)) {
-                $options[ZOOM_AUTORECORDING_CLOUD] = get_string('autorecording_cloud', 'mod_zoomyt');
             }
 
             // Determine default: check category first, then global.
@@ -987,9 +981,36 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         $mform->addElement('hidden', 'meeting_id', -1);
         $mform->setType('meeting_id', PARAM_ALPHANUMEXT);
 
-        // Add host id (will error if user does not have an account on Zoom).
-        $mform->addElement('hidden', 'host_id', $hostuserid);
-        $mform->setType('host_id', PARAM_ALPHANUMEXT);
+        // Meeting host (owner). The host owns the Zoom meeting; the activity's
+        // recordings/start identity belong to this account. It is choosable at
+        // creation time and becomes read-only once the meeting exists.
+        //
+        // When scheduling privilege is offered, the "Schedule for / Change host"
+        // control above already manages the host, so we don't duplicate it here.
+        if (!$showschedulingprivilege) {
+            $mform->addElement('header', 'meetinghost_header', get_string('meetinghost', 'zoomyt'));
+            $mform->setExpanded('meetinghost_header', true);
+
+            if ($isnew) {
+                $hostchoices = $this->get_meeting_host_choices($hostuserid);
+                $mform->addElement('select', 'host_id', get_string('meetinghost', 'zoomyt'), $hostchoices);
+                $mform->setType('host_id', PARAM_ALPHANUMEXT);
+                $mform->setDefault('host_id', $hostuserid);
+                $mform->addHelpButton('host_id', 'meetinghost', 'zoomyt');
+            } else {
+                // Existing meeting: host is fixed. Preserve the value and show it read-only.
+                $mform->addElement('hidden', 'host_id', $hostuserid);
+                $mform->setType('host_id', PARAM_ALPHANUMEXT);
+
+                $hostlabel = $this->get_meeting_host_label($this->current->host_id);
+                $mform->addElement('static', 'meeting_host_display',
+                    get_string('meetinghost', 'zoomyt'), $hostlabel);
+            }
+        } else {
+            // Add host id (will error if user does not have an account on Zoom).
+            $mform->addElement('hidden', 'host_id', $hostuserid);
+            $mform->setType('host_id', PARAM_ALPHANUMEXT);
+        }
 
         // Add YouTube integration settings.
         $this->add_youtube_settings($mform, $config);
@@ -1028,6 +1049,114 @@ class mod_zoomyt_mod_form extends moodleform_mod {
             $gradefieldname = \core_grades\component_gradeitems::get_field_name_for_itemnumber($component, $itemnumber, 'grade');
             $mform->hideIf('grading_method', "{$gradefieldname}[modgrade_type]", 'eq', 'none');
         }
+    }
+
+    /**
+     * Build the auto-recording option list based on what the Zoom account allows.
+     *
+     * Licenses are assigned dynamically at meeting time, so we expose every
+     * recording type the account supports rather than only what the current host
+     * user can do while configuring.
+     *
+     * @param string|int|false|null $hostuserid Optional Zoom user id used as a fallback source.
+     * @return array Option value => label.
+     */
+    protected function build_autorecording_options($hostuserid) {
+        $options = [
+            ZOOM_AUTORECORDING_NONE => get_string('autorecording_none', 'mod_zoomyt'),
+        ];
+
+        $caps = zoomyt_get_recording_capabilities($hostuserid ?: null);
+
+        if (!empty($caps['local'])) {
+            $options[ZOOM_AUTORECORDING_LOCAL] = get_string('autorecording_local', 'mod_zoomyt');
+        }
+        if (!empty($caps['cloud'])) {
+            $options[ZOOM_AUTORECORDING_CLOUD] = get_string('autorecording_cloud', 'mod_zoomyt');
+        }
+
+        return $options;
+    }
+
+    /**
+     * Build the list of Zoom users who may be selected as the meeting host (owner).
+     *
+     * The current user (the creator) is always offered as the default. In addition,
+     * any course teacher who is eligible to be an alternative host AND already has a
+     * Zoom account is offered, so the meeting can be created and owned by them.
+     * Teachers without a Zoom account are skipped because a meeting cannot be created
+     * under an account that does not exist.
+     *
+     * @param string $defaulthostid The creating user's Zoom user id (used as the default).
+     * @return array Map of Zoom user id => display label.
+     */
+    protected function get_meeting_host_choices($defaulthostid) {
+        global $USER;
+
+        $choices = [];
+
+        // The creating user is always available and is the default.
+        if (!empty($defaulthostid)) {
+            $choices[$defaulthostid] = fullname($USER);
+        }
+
+        try {
+            $teachers = get_enrolled_users($this->context, 'mod/zoomyt:eligiblealternativehost',
+                0, 'u.*', 'lastname, firstname');
+        } catch (\Exception $e) {
+            $teachers = [];
+        }
+
+        foreach ($teachers as $teacher) {
+            if (strcasecmp($teacher->email, $USER->email) === 0) {
+                // Already represented by the creator entry.
+                continue;
+            }
+            try {
+                $zoomuser = zoomyt_get_user(core_text::strtolower($teacher->email));
+            } catch (\Exception $e) {
+                // Teacher has no Zoom account; they cannot be the meeting host.
+                continue;
+            }
+            if (!empty($zoomuser->id) && !isset($choices[$zoomuser->id])) {
+                $choices[$zoomuser->id] = fullname($teacher) . ' (' . $teacher->email . ')';
+            }
+        }
+
+        return $choices;
+    }
+
+    /**
+     * Build a human-readable, read-only label for an existing meeting host.
+     *
+     * @param string $hostid The Zoom user id of the meeting host.
+     * @return string Display label (name and email where available).
+     */
+    protected function get_meeting_host_label($hostid) {
+        $name = '';
+        $email = '';
+
+        if (!empty($hostid)) {
+            $name = zoomyt_get_user_display_name($hostid);
+            try {
+                $zoomuser = zoomyt_get_user($hostid);
+                $email = $zoomuser->email ?? '';
+            } catch (\Exception $e) {
+                $email = '';
+            }
+        }
+
+        if ($name !== '' && $email !== '') {
+            return $name . ' (' . $email . ')';
+        }
+        if ($name !== '') {
+            return $name;
+        }
+        if ($email !== '') {
+            return $email;
+        }
+
+        return (string) $hostid;
     }
 
     /**
@@ -1070,30 +1199,9 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         $recordingelement =& $mform->getElement('option_auto_recording');
         $recordingelement->removeOptions();
 
-        // Add auto recording options according to user settings.
-        $options = [
-            ZOOM_AUTORECORDING_NONE => get_string('autorecording_none', 'mod_zoomyt'),
-        ];
-
-        $recordingsettings = null;
-        if ($zoomuserid !== false) {
-            try {
-                $usersettings = zoomyt_get_user_settings($zoomuserid);
-                if ($usersettings && isset($usersettings->recording)) {
-                    $recordingsettings = $usersettings->recording;
-                }
-            } catch (\Exception $e) {
-                debugging('Could not get Zoom user settings: ' . $e->getMessage(), DEBUG_DEVELOPER);
-            }
-        }
-
-        if (!empty($recordingsettings) && !empty($recordingsettings->local_recording)) {
-            $options[ZOOM_AUTORECORDING_LOCAL] = get_string('autorecording_local', 'mod_zoomyt');
-        }
-
-        if (!empty($recordingsettings) && !empty($recordingsettings->cloud_recording)) {
-            $options[ZOOM_AUTORECORDING_CLOUD] = get_string('autorecording_cloud', 'mod_zoomyt');
-        }
+        // Expose every recording type the account supports (licenses are assigned
+        // dynamically at meeting time), not just the host user's current capability.
+        $options = $this->build_autorecording_options($zoomuserid);
 
         $recordingelement->load($options);
     }
@@ -1306,6 +1414,27 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         $errors = parent::validation($data, $files);
 
         $config = get_config('zoomyt');
+
+        // For new meetings, when the meeting host picker is shown, make sure the
+        // submitted host is one of the offered choices (guards against tampering).
+        $isnew = empty($this->_cm);
+        if ($isnew && !$this->showschedulingprivilege && !empty($data['host_id'])) {
+            // Resolve the creating user's Zoom host id the same way definition_inner does,
+            // so it is always a valid choice, then check the submitted value against the
+            // offered set of hosts.
+            $creatorhostid = zoomyt_get_user_id(false);
+            if ($creatorhostid === false) {
+                try {
+                    $creatorhostid = zoomyt_resolve_host_for_meeting($USER->email);
+                } catch (\Exception $e) {
+                    $creatorhostid = '';
+                }
+            }
+            $allowed = array_keys($this->get_meeting_host_choices($creatorhostid));
+            if (!in_array($data['host_id'], $allowed, true)) {
+                $errors['host_id'] = get_string('err_invalid_host', 'zoomyt');
+            }
+        }
 
         // Only check for scheduled meetings.
         if (empty($data['recurring'])) {
@@ -1565,6 +1694,27 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         // Add YouTube settings header.
         $mform->addElement('header', 'youtube_header', get_string('youtube_activity_header', 'zoomyt'));
         $mform->setExpanded('youtube_header', false);
+
+        // Primary language designation for the YouTube upload. Applies to every
+        // upload regardless of which channel is used, so it is not hidden by the
+        // use-category toggle. Defaults to the course language.
+        $courselang = '';
+        if (!empty($COURSE->lang)) {
+            $courselang = $COURSE->lang;
+        }
+        $translations = get_string_manager()->get_list_of_translations();
+        $coursellabel = $courselang !== '' && isset($translations[$courselang])
+            ? $translations[$courselang]
+            : get_string('language');
+        $langoptions = ['' => get_string('yt_primary_language_coursedefault', 'zoomyt', $coursellabel)];
+        foreach ($translations as $code => $name) {
+            $langoptions[$code] = $name;
+        }
+        $mform->addElement('select', 'yt_primary_language',
+            get_string('yt_primary_language', 'zoomyt'), $langoptions);
+        $mform->setDefault('yt_primary_language', '');
+        $mform->setType('yt_primary_language', PARAM_RAW);
+        $mform->addHelpButton('yt_primary_language', 'yt_primary_language', 'zoomyt');
 
         // Option to use category/site channel or activity-specific channel.
         $mform->addElement(

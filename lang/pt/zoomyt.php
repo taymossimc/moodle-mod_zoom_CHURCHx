@@ -191,6 +191,9 @@ Precisam de nota manual: {$a->number}
 <br>
 Usuários com nota: {$a->graded + $a->alreadygraded}';
 $string['host'] = 'Anfitrião';
+$string['meetinghost'] = 'Anfitrião da reunião';
+$string['meetinghost_help'] = 'A conta Zoom proprietária desta reunião. O anfitrião é dono das gravações na nuvem da reunião e inicia a sessão com a sua própria identidade. Pode escolher qualquer professor do curso que tenha uma conta Zoom; por predefinição é você. Não é possível alterar depois de a reunião ser criada.';
+$string['err_invalid_host'] = 'O anfitrião da reunião selecionado não é uma opção válida. Escolha um professor do curso que tenha uma conta Zoom.';
 $string['hostintro'] = '<a target="_blank" href="https://support.zoom.us/hc/en-us/articles/208220166">Anfitriões alternativos</a> podem iniciar reuniões Zoom e gerenciar a sala de espera.';
 $string['indicator:cognitivedepth'] = 'Cognitivo Zoom';
 $string['indicator:cognitivedepth_help'] = 'Indicador baseado na profundidade cognitiva alcançada pelo aluno na atividade Zoom.';
@@ -821,3 +824,28 @@ $string['sign_lang_korean'] = 'Língua de sinais coreana';
 $string['sign_lang_portuguese'] = 'Língua de sinais portuguesa';
 $string['sign_lang_russian'] = 'Língua de sinais russa';
 $string['sign_lang_spanish'] = 'Língua de sinais espanhola';
+
+// Backfilled translations for recently added features.
+$string['audiotracks_heading'] = 'Faixas de áudio de interpretação';
+$string['duck_attack'] = 'Ataque da atenuação (ms)';
+$string['duck_attack_desc'] = 'A rapidez com que o áudio da sala é atenuado assim que o intérprete começa a falar. Predefinição: 5.';
+$string['duck_ratio'] = 'Rácio de atenuação';
+$string['duck_ratio_desc'] = 'Rácio do compressor sidechain. Valores mais altos reduzem mais o áudio da sala. Predefinição: 8.';
+$string['duck_release'] = 'Libertação da atenuação (ms)';
+$string['duck_release_desc'] = 'A rapidez com que o áudio da sala regressa depois de o intérprete parar de falar. Predefinição: 300.';
+$string['duck_threshold'] = 'Limiar de atenuação';
+$string['duck_threshold_desc'] = 'Limiar do compressor sidechain (amplitude linear, 0-1). Valores mais baixos atenuam o áudio da sala mais facilmente quando o intérprete fala. Predefinição: 0.03.';
+$string['enable_multilang_audio'] = 'Ativar faixas de áudio multilingues';
+$string['enable_multilang_audio_desc'] = 'Quando ativado, a tarefa de sincronização com o YouTube cria uma mistura de áudio atenuada (áudio da sala por baixo da voz do intérprete) para cada idioma de interpretação e anexa-a ao vídeo carregado.';
+$string['ffmpeg_path'] = 'Caminho do ffmpeg';
+$string['ffmpeg_path_desc'] = 'Caminho completo para o binário do ffmpeg. Deixe vazio para detetar automaticamente no PATH do sistema.';
+$string['ffprobe_path'] = 'Caminho do ffprobe';
+$string['ffprobe_path_desc'] = 'Caminho completo para o binário do ffprobe. Deixe vazio para detetar automaticamente no PATH do sistema.';
+$string['multilang_audio_settings'] = 'Áudio de interpretação multilingue';
+$string['multilang_audio_settings_desc'] = 'Sintetiza faixas de áudio por idioma a partir das gravações de interpretação de idiomas do Zoom e anexa-as ao vídeo do YouTube como faixas de áudio alternativas. Requer o ffmpeg/ffprobe instalados no servidor, a definição da conta Zoom «Gravar intérprete de idioma» ativada antes das reuniões e um canal do YouTube elegível para áudio multilingue.';
+$string['video'] = 'Vídeo';
+$string['youtube_audiotrack_init_error'] = 'Falha ao inicializar o carregamento da faixa de áudio do YouTube: {$a}';
+$string['youtube_audiotrack_upload_error'] = 'Falha ao carregar a faixa de áudio do YouTube: {$a}';
+$string['yt_primary_language'] = 'Idioma principal do YouTube';
+$string['yt_primary_language_coursedefault'] = 'Predefinição do curso ({$a})';
+$string['yt_primary_language_help'] = 'A designação de idioma utilizada para os carregamentos no YouTube desta atividade (o idioma predefinido do vídeo e a faixa de áudio predefinida). Escolha «Predefinição do curso» para seguir o idioma do curso ou substitua-o aqui.';

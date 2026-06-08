@@ -245,17 +245,31 @@ function zoomyt_sync_custom_occurrence_meetings(stdClass $zoom, array $desired):
         $id = !empty($occ['id']) ? (int) $occ['id'] : 0;
         $row = ($id && isset($existing[$id])) ? $existing[$id] : null;
 
-        // Existing session that already has a Zoom meeting: update in place if changed.
+        // Existing session that already has a Zoom meeting.
         if ($row && !empty($row->meeting_id) && !empty($row->exists_on_zoom)) {
             $keep[$row->id] = true;
-            if ((int) $row->start_time !== $start || (int) $row->duration !== $durmin) {
+            $datechanged = ((int) $row->start_time !== $start || (int) $row->duration !== $durmin);
+
+            // Re-push the full meeting settings for any session that has not yet
+            // ended, so changes made when editing the activity (e.g. enabling
+            // language interpretation, recording, alternative hosts) propagate to
+            // the already-created per-session Zoom meetings - not just when the
+            // date/duration changes. Past/finished sessions are left untouched.
+            $sessionended = ($start + $dursec) < $now;
+
+            if ($datechanged || !$sessionended) {
                 try {
                     $service->update_scheduled_occurrence($zoom, $row->meeting_id, $start, $dursec,
                         $zoom->coursemodule ?? null);
-                    $updated++;
+                    if ($datechanged) {
+                        $updated++;
+                    }
                 } catch (moodle_exception $e) {
                     $errors[] = userdate($start) . ': ' . $e->getMessage();
                 }
+            }
+
+            if ($datechanged) {
                 $row->start_time = $start;
                 $row->duration = $durmin;
                 $row->timemodified = $now;

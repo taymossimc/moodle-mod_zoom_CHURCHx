@@ -220,6 +220,10 @@ function zoomyt_add_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = null)
         }
 
         $zoom->id = $DB->insert_record('zoomyt', $zoom);
+
+        // Confirm the created meeting actually carries the expected settings
+        // (notably interpretation) and warn in the UI if Zoom dropped any.
+        zoomyt_notify_setting_verification($zoom, $zoom->meeting_id, $zoom->webinar);
     }
 
     if (!empty($zoom->breakoutrooms)) {
@@ -394,6 +398,10 @@ function zoomyt_update_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = nu
         $response = zoomyt_webservice()->get_meeting_webinar_info($zoom->meeting_id, $zoom->webinar);
         $zoom = populate_zoomyt_from_response($zoom, $response);
         $DB->update_record('zoomyt', $zoom);
+
+        // Confirm the updated meeting actually carries the expected settings
+        // (notably interpretation) and warn in the UI if Zoom dropped any.
+        zoomyt_notify_setting_verification($zoom, $zoom->meeting_id, $zoom->webinar);
 
         // Update tracking field data for meeting.
         zoomyt_sync_meeting_tracking_fields($zoom->id, $response->tracking_fields ?? []);

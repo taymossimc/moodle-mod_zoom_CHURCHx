@@ -264,6 +264,12 @@ function zoomyt_sync_custom_occurrence_meetings(stdClass $zoom, array $desired):
                     if ($datechanged) {
                         $updated++;
                     }
+                    // Confirm the settings (notably interpretation) actually applied.
+                    if (!$sessionended) {
+                        foreach (zoomyt_verify_meeting_settings($zoom, $row->meeting_id, $zoom->webinar) as $p) {
+                            $errors[] = userdate($start) . ': ' . $p;
+                        }
+                    }
                 } catch (moodle_exception $e) {
                     $errors[] = userdate($start) . ': ' . $e->getMessage();
                 }
@@ -287,6 +293,13 @@ function zoomyt_sync_custom_occurrence_meetings(stdClass $zoom, array $desired):
             $joinurl = $resp->join_url ?? null;
         } catch (moodle_exception $e) {
             $errors[] = userdate($start) . ': ' . $e->getMessage();
+        }
+
+        // Confirm the settings (notably interpretation) actually applied on Zoom.
+        if ($meetingid) {
+            foreach (zoomyt_verify_meeting_settings($zoom, $meetingid, $zoom->webinar) as $p) {
+                $errors[] = userdate($start) . ': ' . $p;
+            }
         }
 
         if ($row) {
@@ -406,6 +419,140 @@ function zoomyt_apply_custom_representative(stdClass $zoom): void {
     foreach ((array) $update as $field => $value) {
         $zoom->$field = $value;
     }
+}
+
+/**
+ * Verify a meeting's settings and surface any problems to the user via the UI.
+ *
+ * Used by the single-meeting create/update paths so a silently dropped setting
+ * (e.g. interpretation the host account can't carry) shows up as a visible error
+ * instead of the meeting quietly running without translation.
+ *
+ * @param stdClass $zoom Activity record carrying the expected settings.
+ * @param int|string $meetingid Zoom meeting/webinar id.
+ * @param bool $webinar Whether it's a webinar.
+ * @return void
+ */
+function zoomyt_notify_setting_verification(stdClass $zoom, $meetingid, $webinar): void {
+    $problems = zoomyt_verify_meeting_settings($zoom, $meetingid, $webinar);
+    if (!empty($problems)) {
+        \core\notification::error(
+            get_string('verify_problems_intro', 'zoomyt') . ' ' . implode(' | ', $problems)
+        );
+    }
+}
+
+/**
+ * Verify that a created/updated Zoom meeting actually carries the settings we
+ * expect, focusing on settings Zoom can silently drop. The main case is language
+ * and sign-language interpretation: Zoom accepts the request but discards the
+ * interpreters if the feature is disabled for the host account, so the meeting
+ * would otherwise run without translation and nobody would know.
+ *
+ * @param stdClass $zoom The activity record carrying the expected settings.
+ * @param int|string $meetingid The Zoom meeting/webinar id to check.
+ * @param bool $webinar Whether this is a webinar.
+ * @return string[] Human-readable problems; empty array if everything matches.
+ */
+function zoomyt_verify_meeting_settings(stdClass $zoom, $meetingid, $webinar): array {
+    $problems = [];
+    if (empty($meetingid)) {
+        return $problems;
+    }
+
+    try {
+        $remote = zoomyt_webservice()->get_meeting_webinar_info($meetingid, $webinar);
+    } catch (moodle_exception $e) {
+        return [get_string('verify_fetch_failed', 'zoomyt', $e->getMessage())];
+    }
+
+    $settings = $remote->settings ?? null;
+
+    // Spoken-language interpretation.
+    if (!empty($zoom->interpretation_enable) && !empty($zoom->interpretation_data)) {
+        $expected = json_decode($zoom->interpretation_data, true);
+        if (is_array($expected) && count($expected) > 0) {
+            $problems = array_merge($problems, zoomyt_diff_interpreters(
+                $expected,
+                $settings->language_interpretation ?? null,
+                get_string('interpretation_spoken_label', 'zoomyt'),
+                true
+            ));
+        }
+    }
+
+    // Sign-language interpretation.
+    if (!empty($zoom->sign_interpretation_enable) && !empty($zoom->sign_interpretation_data)) {
+        $expected = json_decode($zoom->sign_interpretation_data, true);
+        if (is_array($expected) && count($expected) > 0) {
+            $problems = array_merge($problems, zoomyt_diff_interpreters(
+                $expected,
+                $settings->sign_language_interpretation ?? null,
+                get_string('interpretation_sign_label', 'zoomyt'),
+                false
+            ));
+        }
+    }
+
+    return $problems;
+}
+
+/**
+ * Compare expected interpreters against what Zoom actually stored for a meeting.
+ *
+ * @param array $expected Decoded interpreter list from the activity record.
+ * @param stdClass|null $actual The remote settings.*_interpretation object.
+ * @param string $label Localised label for this interpretation type.
+ * @param bool $checklanguages Whether to compare the per-interpreter language list
+ *                             (spoken interpretation only; sign uses a different shape).
+ * @return string[] Problems found for this interpretation type.
+ */
+function zoomyt_diff_interpreters(array $expected, $actual, string $label, bool $checklanguages): array {
+    $normalise = function($langs) {
+        $parts = array_filter(array_map('trim', explode(',', strtoupper((string) $langs))));
+        sort($parts);
+        return implode(',', $parts);
+    };
+
+    // Nothing applied at all - the usual symptom of the feature being disabled.
+    if (empty($actual) || empty($actual->enable) || empty($actual->interpreters)) {
+        return [get_string('verify_interp_not_applied', 'zoomyt', $label)];
+    }
+
+    $actualbyemail = [];
+    foreach ($actual->interpreters as $intp) {
+        $email = isset($intp->email) ? core_text::strtolower(trim($intp->email)) : '';
+        if ($email !== '') {
+            $actualbyemail[$email] = $intp;
+        }
+    }
+
+    $problems = [];
+    foreach ($expected as $exp) {
+        $email = isset($exp['email']) ? core_text::strtolower(trim($exp['email'])) : '';
+        if ($email === '') {
+            continue;
+        }
+        if (!isset($actualbyemail[$email])) {
+            $problems[] = get_string('verify_interp_missing_email', 'zoomyt',
+                (object) ['label' => $label, 'email' => $email]);
+            continue;
+        }
+        if ($checklanguages) {
+            $expectedlangs = $normalise($exp['languages'] ?? '');
+            $actuallangs = $normalise($actualbyemail[$email]->languages ?? '');
+            if ($expectedlangs !== '' && $expectedlangs !== $actuallangs) {
+                $problems[] = get_string('verify_interp_lang_mismatch', 'zoomyt', (object) [
+                    'label' => $label,
+                    'email' => $email,
+                    'expected' => $expectedlangs,
+                    'actual' => $actuallangs !== '' ? $actuallangs : '-',
+                ]);
+            }
+        }
+    }
+
+    return $problems;
 }
 
 /**

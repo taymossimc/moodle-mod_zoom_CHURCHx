@@ -844,3 +844,12 @@ $string['youtube_audiotrack_upload_error'] = 'No se pudo subir la pista de audio
 $string['yt_primary_language'] = 'Idioma principal de YouTube';
 $string['yt_primary_language_coursedefault'] = 'Predeterminado del curso ({$a})';
 $string['yt_primary_language_help'] = 'La designación de idioma utilizada para las subidas a YouTube de esta actividad (el idioma predeterminado del vídeo y la pista de audio predeterminada). Elija «Predeterminado del curso» para seguir el idioma del curso, o anúlelo aquí.';
+
+// Post-creation settings verification.
+$string['interpretation_spoken_label'] = 'Interpretación de idiomas';
+$string['interpretation_sign_label'] = 'Interpretación en lengua de signos';
+$string['verify_problems_intro'] = 'Advertencia: la reunión se guardó, pero no se pudieron confirmar algunos ajustes de Zoom:';
+$string['verify_fetch_failed'] = 'No se pudieron verificar los ajustes de la reunión de Zoom: {$a}';
+$string['verify_interp_not_applied'] = '{$a}: los intérpretes no se aplicaron en Zoom. Es probable que la función esté deshabilitada en la cuenta de Zoom del anfitrión.';
+$string['verify_interp_missing_email'] = '{$a->label}: el intérprete {$a->email} no se aplicó en Zoom.';
+$string['verify_interp_lang_mismatch'] = '{$a->label}: el intérprete {$a->email} tiene los idiomas "{$a->actual}" en Zoom, pero se esperaban "{$a->expected}".';

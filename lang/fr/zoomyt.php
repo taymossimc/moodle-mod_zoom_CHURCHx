@@ -844,3 +844,12 @@ $string['youtube_audiotrack_upload_error'] = 'Échec du téléversement de la pi
 $string['yt_primary_language'] = 'Langue principale YouTube';
 $string['yt_primary_language_coursedefault'] = 'Valeur par défaut du cours ({$a})';
 $string['yt_primary_language_help'] = 'La désignation de langue utilisée pour les téléversements YouTube de cette activité (la langue par défaut de la vidéo et la piste audio par défaut). Choisissez « Valeur par défaut du cours » pour suivre la langue du cours, ou remplacez-la ici.';
+
+// Post-creation settings verification.
+$string['interpretation_spoken_label'] = 'Interprétation linguistique';
+$string['interpretation_sign_label'] = 'Interprétation en langue des signes';
+$string['verify_problems_intro'] = 'Avertissement : la réunion a été enregistrée, mais certains paramètres Zoom n\'ont pas pu être confirmés :';
+$string['verify_fetch_failed'] = 'Impossible de vérifier les paramètres de la réunion Zoom : {$a}';
+$string['verify_interp_not_applied'] = '{$a} : les interprètes n\'ont pas été appliqués sur Zoom. La fonctionnalité est probablement désactivée pour le compte Zoom de l\'hôte.';
+$string['verify_interp_missing_email'] = '{$a->label} : l\'interprète {$a->email} n\'a pas été appliqué sur Zoom.';
+$string['verify_interp_lang_mismatch'] = '{$a->label} : l\'interprète {$a->email} a les langues "{$a->actual}" sur Zoom, mais "{$a->expected}" étaient attendues.';

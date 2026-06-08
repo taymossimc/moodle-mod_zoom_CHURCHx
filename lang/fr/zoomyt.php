@@ -853,3 +853,5 @@ $string['verify_fetch_failed'] = 'Impossible de vérifier les paramètres de la 
 $string['verify_interp_not_applied'] = '{$a} : les interprètes n\'ont pas été appliqués sur Zoom. La fonctionnalité est probablement désactivée pour le compte Zoom de l\'hôte.';
 $string['verify_interp_missing_email'] = '{$a->label} : l\'interprète {$a->email} n\'a pas été appliqué sur Zoom.';
 $string['verify_interp_lang_mismatch'] = '{$a->label} : l\'interprète {$a->email} a les langues "{$a->actual}" sur Zoom, mais "{$a->expected}" étaient attendues.';
+$string['verify_recording_mismatch'] = 'L\'enregistrement automatique est "{$a->actual}" sur Zoom, mais "{$a->expected}" était attendu. Le compte Zoom de l\'hôte n\'autorise peut-être pas ce type d\'enregistrement.';
+$string['verify_waitingroom_mismatch'] = 'La salle d\'attente est {$a->actual} sur Zoom, mais {$a->expected} était attendu.';

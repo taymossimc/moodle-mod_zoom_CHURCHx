@@ -853,3 +853,5 @@ $string['verify_fetch_failed'] = 'No se pudieron verificar los ajustes de la reu
 $string['verify_interp_not_applied'] = '{$a}: los intérpretes no se aplicaron en Zoom. Es probable que la función esté deshabilitada en la cuenta de Zoom del anfitrión.';
 $string['verify_interp_missing_email'] = '{$a->label}: el intérprete {$a->email} no se aplicó en Zoom.';
 $string['verify_interp_lang_mismatch'] = '{$a->label}: el intérprete {$a->email} tiene los idiomas "{$a->actual}" en Zoom, pero se esperaban "{$a->expected}".';
+$string['verify_recording_mismatch'] = 'La grabación automática es "{$a->actual}" en Zoom, pero se esperaba "{$a->expected}". Es posible que la cuenta de Zoom del anfitrión no permita este tipo de grabación.';
+$string['verify_waitingroom_mismatch'] = 'La sala de espera es {$a->actual} en Zoom, pero se esperaba {$a->expected}.';

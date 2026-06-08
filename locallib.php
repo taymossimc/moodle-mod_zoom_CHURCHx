@@ -494,6 +494,33 @@ function zoomyt_verify_meeting_settings(stdClass $zoom, $meetingid, $webinar): a
         }
     }
 
+    // Automatic recording. Only verify when an explicit choice was made (skip the
+    // "use the user's default" option, whose effective value we don't pin down).
+    // Zoom downgrades this to "none" if the host account can't do the chosen type.
+    $expectedrec = $zoom->option_auto_recording ?? '';
+    if ($expectedrec !== '' && $expectedrec !== ZOOM_AUTORECORDING_USERDEFAULT) {
+        $actualrec = $settings->auto_recording ?? ZOOM_AUTORECORDING_NONE;
+        if ($expectedrec !== $actualrec) {
+            $problems[] = get_string('verify_recording_mismatch', 'zoomyt', (object) [
+                'expected' => $expectedrec,
+                'actual' => $actualrec,
+            ]);
+        }
+    }
+
+    // Waiting room (meetings only). Skip when join-before-host is enabled, since
+    // Zoom intentionally disables the waiting room in that case (not a silent drop).
+    if (empty($zoom->webinar) && empty($zoom->option_jbh) && isset($zoom->option_waiting_room)) {
+        $expectedwr = (bool) $zoom->option_waiting_room;
+        $actualwr = !empty($settings->waiting_room);
+        if ($expectedwr !== $actualwr) {
+            $problems[] = get_string('verify_waitingroom_mismatch', 'zoomyt', (object) [
+                'expected' => $expectedwr ? get_string('yes') : get_string('no'),
+                'actual' => $actualwr ? get_string('yes') : get_string('no'),
+            ]);
+        }
+    }
+
     return $problems;
 }
 

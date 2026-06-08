@@ -858,3 +858,5 @@ $string['verify_fetch_failed'] = 'Não foi possível verificar as definições d
 $string['verify_interp_not_applied'] = '{$a}: os intérpretes não foram aplicados no Zoom. A funcionalidade está provavelmente desativada na conta Zoom do anfitrião.';
 $string['verify_interp_missing_email'] = '{$a->label}: o intérprete {$a->email} não foi aplicado no Zoom.';
 $string['verify_interp_lang_mismatch'] = '{$a->label}: o intérprete {$a->email} tem os idiomas "{$a->actual}" no Zoom, mas eram esperados "{$a->expected}".';
+$string['verify_recording_mismatch'] = 'A gravação automática é "{$a->actual}" no Zoom, mas era esperada "{$a->expected}". A conta Zoom do anfitrião pode não permitir este tipo de gravação.';
+$string['verify_waitingroom_mismatch'] = 'A sala de espera está {$a->actual} no Zoom, mas era esperada {$a->expected}.';

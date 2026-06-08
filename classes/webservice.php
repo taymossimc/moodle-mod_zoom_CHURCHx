@@ -1008,6 +1008,44 @@ class webservice {
     }
 
     /**
+     * Ensure the meeting host has language / sign-language interpretation enabled
+     * in their Zoom user settings, when the activity uses those features.
+     *
+     * Zoom silently drops a meeting's interpreters if the feature is disabled for
+     * the host account/user, so it must be enabled before interpreters are sent.
+     * Because licenses (and therefore hosts) are assigned dynamically, we enable it
+     * on whichever user will own the meeting. Best-effort: failures (e.g. a missing
+     * OAuth scope) are logged but do not block meeting creation.
+     *
+     * @param stdClass $zoom The activity/meeting record (host_id and interpretation flags).
+     * @return void
+     */
+    public function ensure_interpretation_enabled($zoom) {
+        if (empty($zoom->host_id)) {
+            return;
+        }
+
+        $settings = [];
+        if (!empty($zoom->interpretation_enable) && !empty($zoom->interpretation_data)) {
+            $settings['language_interpretation'] = ['enable' => true];
+        }
+        if (!empty($zoom->sign_interpretation_enable) && !empty($zoom->sign_interpretation_data)) {
+            $settings['sign_language_interpretation'] = ['enable' => true];
+        }
+        if (empty($settings)) {
+            return;
+        }
+
+        try {
+            // Granular: user:update:settings:admin.
+            $this->make_call("users/{$zoom->host_id}/settings", ['in_meeting' => $settings], 'patch');
+        } catch (\Exception $e) {
+            debugging('ZOOMYT: could not enable interpretation for host ' . $zoom->host_id
+                . ': ' . $e->getMessage(), DEBUG_DEVELOPER);
+        }
+    }
+
+    /**
      * Create a meeting/webinar on Zoom.
      * Take a $zoom object as returned from the Moodle form and respond with an object that can be saved to the database.
      *
@@ -1020,6 +1058,9 @@ class webservice {
 
         // Provide license if needed.
         $this->provide_license($zoom->host_id);
+
+        // Make sure the host can actually carry interpreters before we send them.
+        $this->ensure_interpretation_enabled($zoom);
 
         // Classic: meeting:write:admin.
         // Granular: meeting:write:meeting:admin.
@@ -1050,6 +1091,9 @@ class webservice {
         // Granular: meeting:update:meeting:admin.
         // Classic: webinar:write:admin.
         // Granular: webinar:update:webinar:admin.
+        // Make sure the host can actually carry interpreters before we send them.
+        $this->ensure_interpretation_enabled($zoom);
+
         $url = ($zoom->webinar ? 'webinars/' : 'meetings/') . $zoom->meeting_id;
         $this->make_call($url, $this->database_to_api($zoom, $cmid), 'patch');
     }
@@ -1075,6 +1119,9 @@ class webservice {
         $clone->start_time = $starttime;
         $clone->duration = $durationseconds;
 
+        // Make sure the host can actually carry interpreters before we send them.
+        $this->ensure_interpretation_enabled($clone);
+
         $url = "users/$clone->host_id/" . (!empty($clone->webinar) ? 'webinars' : 'meetings');
         return $this->make_call($url, $this->database_to_api($clone, $cmid), 'post');
     }
@@ -1095,6 +1142,9 @@ class webservice {
         $clone->start_time = $starttime;
         $clone->duration = $durationseconds;
         $clone->meeting_id = $meetingid;
+
+        // Make sure the host can actually carry interpreters before we send them.
+        $this->ensure_interpretation_enabled($clone);
 
         $url = (!empty($clone->webinar) ? 'webinars/' : 'meetings/') . $meetingid;
         $this->make_call($url, $this->database_to_api($clone, $cmid), 'patch');

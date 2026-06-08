@@ -87,6 +87,14 @@ function zoomyt_add_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = null)
         $zoom->password = '';
     }
 
+    // A custom-dates meeting is identified by its recurrence type. The custom-dates
+    // table is always shown, so the "recurring" checkbox can be submitted unchecked
+    // while the type is still CUSTOM. Normalise so custom-dates meetings are always
+    // treated as recurring and their per-session meetings get created/synced.
+    if (($zoom->recurrence_type ?? null) == ZOOM_RECURRINGTYPE_CUSTOM) {
+        $zoom->recurring = 1;
+    }
+
     // Handle weekdays if weekly recurring meeting selected.
     if ($zoom->recurring && $zoom->recurrence_type == ZOOM_RECURRINGTYPE_WEEKLY) {
         $zoom->weekly_days = zoomyt_handle_weekly_days($zoom);
@@ -271,6 +279,14 @@ function zoomyt_update_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = nu
 
     if (property_exists($zoom, 'requirepasscode') && empty($zoom->requirepasscode)) {
         $zoom->password = '';
+    }
+
+    // A custom-dates meeting is identified by its recurrence type. The custom-dates
+    // table is always shown, so the "recurring" checkbox can be submitted unchecked
+    // while the type is still CUSTOM. Normalise so custom-dates meetings are always
+    // treated as recurring and their per-session meetings get created/synced.
+    if (($zoom->recurrence_type ?? null) == ZOOM_RECURRINGTYPE_CUSTOM) {
+        $zoom->recurring = 1;
     }
 
     // Handle weekdays if weekly recurring meeting selected.

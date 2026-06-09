@@ -49,6 +49,29 @@ $PAGE->set_title(format_string($zoom->name) . ' - ' . get_string('manage_recordi
 $PAGE->set_heading(format_string($course->fullname));
 $PAGE->set_context($context);
 
+// Handle download of a synthesized interpretation audio track (awaiting manual
+// upload to YouTube Studio).
+if ($action === 'downloadtrack') {
+    require_sesskey();
+    $trackid = required_param('trackid', PARAM_INT);
+
+    $track = $DB->get_record_sql(
+        "SELECT zat.*
+           FROM {zoomyt_video_audiotracks} zat
+           JOIN {zoomyt_videos} zv ON zv.id = zat.videoid
+          WHERE zat.id = :trackid AND zv.zoomid = :zoomid",
+        ['trackid' => $trackid, 'zoomid' => $zoom->id], MUST_EXIST);
+
+    $filepath = zoomyt_audiotrack_archive_path($track->videoid, $track->language);
+    if (!file_exists($filepath)) {
+        throw new moodle_exception('audiotrack_file_missing', 'zoomyt');
+    }
+
+    $filename = clean_filename('video' . $track->videoid . '_' . $track->language . '.m4a');
+    send_file($filepath, $filename, null, 0, false, true, 'audio/mp4');
+    exit;
+}
+
 // Handle actions.
 if ($action === 'togglevisibility' && $videoid) {
     require_sesskey();
@@ -368,7 +391,7 @@ echo html_writer::end_div();
 
 // Multi-language interpretation audio track status (read-only summary).
 if (!empty(get_config('zoomyt', 'enable_multilang_audio'))) {
-    $tracksql = "SELECT zat.id, zat.language, zat.status, zat.error_message,
+    $tracksql = "SELECT zat.id, zat.videoid, zat.language, zat.status, zat.error_message,
                         zv.title, zv.youtube_video_id
                    FROM {zoomyt_video_audiotracks} zat
                    JOIN {zoomyt_videos} zv ON zv.id = zat.videoid
@@ -383,18 +406,41 @@ if (!empty(get_config('zoomyt', 'enable_multilang_audio'))) {
             get_string('video', 'zoomyt'),
             get_string('language'),
             get_string('status'),
-            get_string('error'),
+            get_string('notes', 'zoomyt'),
+            get_string('actions'),
         ];
         $table->attributes['class'] = 'generaltable';
         foreach ($audiotracks as $track) {
             $statusclass = $track->status === 'attached' ? 'badge-success'
                 : ($track->status === 'failed' ? 'badge-danger' : 'badge-secondary');
             $statuscell = html_writer::tag('span', s($track->status), ['class' => 'badge ' . $statusclass]);
+
+            $notes = '';
+            $actions = '';
+            if ($track->status === 'failed') {
+                $notes = s($track->error_message);
+            } else if ($track->status === 'synthesized') {
+                if (file_exists(zoomyt_audiotrack_archive_path($track->videoid, $track->language))) {
+                    $notes = get_string('audiotrack_manualupload_note', 'zoomyt');
+                    $downloadurl = new moodle_url('/mod/zoomyt/manage_recordings.php', [
+                        'id' => $id,
+                        'action' => 'downloadtrack',
+                        'trackid' => $track->id,
+                        'sesskey' => sesskey(),
+                    ]);
+                    $actions = html_writer::link($downloadurl, get_string('download'),
+                        ['class' => 'btn btn-sm btn-outline-primary']);
+                } else {
+                    $notes = get_string('audiotrack_file_missing', 'zoomyt');
+                }
+            }
+
             $table->data[] = [
                 format_string($track->title),
                 s($track->language),
                 $statuscell,
-                $track->status === 'failed' ? s($track->error_message) : '',
+                $notes,
+                $actions,
             ];
         }
         echo html_writer::table($table);

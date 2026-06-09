@@ -827,6 +827,9 @@ $string['sign_lang_spanish'] = 'Língua de sinais espanhola';
 
 // Backfilled translations for recently added features.
 $string['audiotracks_heading'] = 'Faixas de áudio de interpretação';
+$string['notes'] = 'Notas';
+$string['audiotrack_manualupload_note'] = 'Pronta para carregamento manual no YouTube Studio (separador Idiomas).';
+$string['audiotrack_file_missing'] = 'O ficheiro da faixa de áudio sintetizada já não está disponível.';
 $string['duck_attack'] = 'Ataque da atenuação (ms)';
 $string['duck_attack_desc'] = 'A rapidez com que o áudio da sala é atenuado assim que o intérprete começa a falar. Predefinição: 5.';
 $string['duck_ratio'] = 'Rácio de atenuação';

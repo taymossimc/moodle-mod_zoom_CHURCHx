@@ -239,6 +239,19 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
     }
 
     /**
+     * Persistent path where a synthesized interpretation audio track is archived
+     * when it cannot be attached to YouTube automatically (for manual upload via
+     * YouTube Studio's Languages tab).
+     *
+     * @param int $videoid The zoomyt_videos id.
+     * @param string $lang BCP-47 language code.
+     * @return string Absolute file path.
+     */
+    protected function audiotrack_archive_path(int $videoid, string $lang): string {
+        return zoomyt_audiotrack_archive_path($videoid, $lang);
+    }
+
+    /**
      * Get recordings that need to be synced to YouTube.
      *
      * @param int|null $instanceid Optional specific zoom instance ID.
@@ -615,6 +628,7 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
         global $CFG, $DB;
 
         if (empty(get_config('zoomyt', 'enable_multilang_audio'))) {
+            mtrace('Skipping interpretation audio tracks: enable_multilang_audio is disabled.');
             return;
         }
 
@@ -761,10 +775,26 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
                     continue;
                 }
 
-                // Skip if this track is already attached.
+                // The default (floor) track already carries the primary language;
+                // an interpretation channel in that language would collide with it.
+                if ($lang === $primarylang) {
+                    mtrace('  Interpretation recording ' . $interp->id . ' is the primary language (' .
+                        $lang . '); covered by the default track, skipping.');
+                    continue;
+                }
+
+                // Skip if this track is already attached, or already synthesized and
+                // archived for manual upload (YouTube currently has no public API to
+                // attach multi-language audio tracks).
                 $existing = $DB->get_record('zoomyt_video_audiotracks',
                     ['videoid' => $video->id, 'language' => $lang]);
                 if ($existing && $existing->status === 'attached') {
+                    continue;
+                }
+                if ($existing && $existing->status === 'synthesized'
+                        && file_exists($this->audiotrack_archive_path($video->id, $lang))) {
+                    mtrace('  ' . $lang . ' track for video ' . $video->id .
+                        ' already synthesized and awaiting manual upload, skipping.');
                     continue;
                 }
 
@@ -829,11 +859,23 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
                     $built++;
                     mtrace('  Attached ' . $lang . ' audio track.');
                 } catch (\Exception $e) {
-                    $track->status = 'failed';
-                    $track->error_message = 'Attach failed: ' . $e->getMessage();
+                    // The synthesis succeeded, so archive the track instead of discarding
+                    // it: it can be uploaded manually in YouTube Studio (Languages tab),
+                    // and we avoid re-downloading/re-synthesizing on every cron run.
+                    $archivepath = $this->audiotrack_archive_path($video->id, $lang);
+                    if (file_exists($outpath) && @rename($outpath, $archivepath)) {
+                        $track->status = 'synthesized';
+                        $track->error_message = 'Attach failed: ' . $e->getMessage() .
+                            ' -- synthesized track saved for manual upload: ' . $archivepath;
+                        mtrace('  Attach failed for ' . $lang . ': ' . $e->getMessage());
+                        mtrace('  Saved synthesized ' . $lang . ' track for manual upload: ' . $archivepath);
+                    } else {
+                        $track->status = 'failed';
+                        $track->error_message = 'Attach failed: ' . $e->getMessage();
+                        mtrace('  Attach failed for ' . $lang . ': ' . $e->getMessage());
+                    }
                     $track->timemodified = time();
                     $DB->update_record('zoomyt_video_audiotracks', $track);
-                    mtrace('  Attach failed for ' . $lang . ': ' . $e->getMessage());
                 } finally {
                     if (file_exists($outpath)) {
                         @unlink($outpath);

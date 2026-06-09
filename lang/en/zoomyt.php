@@ -636,6 +636,9 @@ $string['duck_release_desc'] = 'How quickly the room audio returns after the int
 $string['youtube_audiotrack_init_error'] = 'Failed to initialize YouTube audio track upload: {$a}';
 $string['youtube_audiotrack_upload_error'] = 'Failed to upload YouTube audio track: {$a}';
 $string['audiotracks_heading'] = 'Interpretation audio tracks';
+$string['notes'] = 'Notes';
+$string['audiotrack_manualupload_note'] = 'Ready for manual upload in YouTube Studio (Languages tab).';
+$string['audiotrack_file_missing'] = 'The synthesized audio track file is no longer available.';
 $string['video'] = 'Video';
 
 // Activity YouTube primary language.

@@ -727,6 +727,86 @@ function zoomyt_interp_code_to_bcp47(string $code): ?string {
 }
 
 /**
+ * Map a language display name, as Zoom uses in interpretation recording file
+ * names, to a BCP-47 code. Covers Zoom's standard interpretation languages in
+ * both their native and English spellings.
+ *
+ * @param string $name Language display name, e.g. "English", "Português", "日本語".
+ * @return string|null BCP-47 code or null when unknown.
+ */
+function zoomyt_interp_language_name_to_bcp47(string $name): ?string {
+    $map = [
+        'english' => 'en',
+        'chinese' => 'zh',
+        '中文' => 'zh',
+        'japanese' => 'ja',
+        '日本語' => 'ja',
+        'german' => 'de',
+        'deutsch' => 'de',
+        'french' => 'fr',
+        'français' => 'fr',
+        'francais' => 'fr',
+        'russian' => 'ru',
+        'русский' => 'ru',
+        'portuguese' => 'pt',
+        'português' => 'pt',
+        'portugues' => 'pt',
+        'spanish' => 'es',
+        'español' => 'es',
+        'espanol' => 'es',
+        'korean' => 'ko',
+        '한국어' => 'ko',
+        'italian' => 'it',
+        'italiano' => 'it',
+        'vietnamese' => 'vi',
+        'tiếng việt' => 'vi',
+        'dutch' => 'nl',
+        'nederlands' => 'nl',
+        'arabic' => 'ar',
+        'العربية' => 'ar',
+        'ukrainian' => 'uk',
+        'українська' => 'uk',
+    ];
+    $name = core_text::strtolower(trim($name));
+    return $map[$name] ?? null;
+}
+
+/**
+ * Persistent path where a synthesized interpretation audio track is archived
+ * when it cannot be attached to YouTube automatically (for manual upload via
+ * YouTube Studio's Languages tab).
+ *
+ * @param int $videoid The zoomyt_videos id.
+ * @param string $lang BCP-47 language code.
+ * @return string Absolute file path.
+ */
+function zoomyt_audiotrack_archive_path(int $videoid, string $lang): string {
+    global $CFG;
+
+    $dir = $CFG->dataroot . '/zoomyt_audiotracks';
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+    }
+    return $dir . '/video' . $videoid . '_' . clean_param($lang, PARAM_SAFEDIR) . '.m4a';
+}
+
+/**
+ * Derive the BCP-47 language code of an interpretation recording from Zoom's
+ * recording file name, e.g. "Audio only - Interpretation (Português)" -> "pt".
+ *
+ * @param string $filename Zoom recording file_name.
+ * @return string|null BCP-47 code or null when it cannot be determined.
+ */
+function zoomyt_interp_filename_to_bcp47(string $filename): ?string {
+    // The language is the content of the last parenthesised group.
+    if (!preg_match_all('/\(([^()]+)\)/u', $filename, $matches) || empty($matches[1])) {
+        return null;
+    }
+    $name = end($matches[1]);
+    return zoomyt_interp_language_name_to_bcp47($name);
+}
+
+/**
  * Convert a Moodle language code (e.g. "en", "pt_br", "es_mx") to a BCP-47 code
  * suitable for YouTube's defaultLanguage/defaultAudioLanguage and audio tracks
  * (e.g. "en", "pt-BR", "es-MX").

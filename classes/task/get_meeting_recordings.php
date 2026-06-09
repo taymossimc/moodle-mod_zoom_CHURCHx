@@ -184,12 +184,20 @@ class get_meeting_recordings extends scheduled_task {
 
         $meetingpasscodes = [];
         $localrecordings = zoomyt_get_meeting_recordings_grouped();
+        $interpmeetings = [];
 
         foreach ($hostmeetings as $hostid => $meetings) {
             // Fetch all recordings for this user.
             $zoomrecordings = $service->get_user_recordings($hostid, $from, $to);
 
             foreach ($zoomrecordings as $recordingid => $recording) {
+                // Zoom's user-level recordings API omits audio_interpretation files,
+                // so remember interpretation-enabled meetings for a per-meeting pass below.
+                $interpzoom = $meetings[$recording->meetingid] ?? null;
+                if ($interpzoom && !empty($interpzoom->interpretation_enable)) {
+                    $interpmeetings[$recording->meetinguuid] = $interpzoom;
+                }
+
                 if (isset($localrecordings[$recording->meetinguuid][$recordingid])) {
                     mtrace('Recording id: ' . $recordingid . ' exists...skipping');
                     $localrecording = $localrecordings[$recording->meetinguuid][$recordingid];
@@ -201,6 +209,8 @@ class get_meeting_recordings extends scheduled_task {
                         ];
                         $DB->update_record('zoomyt_meeting_recordings', $updatemeeting);
                     }
+
+                    $this->backfill_language($localrecording, $recording, $now);
                     continue;
                 }
 
@@ -221,39 +231,126 @@ class get_meeting_recordings extends scheduled_task {
                 }
 
                 $zoom = $meetings[$recording->meetingid];
-                $recordingtype = $recording->recordingtype;
-
-                $record = new stdClass();
-                $record->zoomid = $zoom->id;
-                $record->meetinguuid = $recording->meetinguuid;
-                $record->zoomrecordingid = $recordingid;
-                $record->name = $zoom->name;
-                $record->externalurl = $recording->url;
-                $record->passcode = $meetingpasscodes[$recording->meetinguuid];
-                $record->recordingtype = $recordingtype;
-                $record->recordingstart = $recording->recordingstart;
-                $record->showrecording = $zoom->recordings_visible_default;
-                $record->timecreated = $now;
-                $record->timemodified = $now;
-
-                $record->id = $DB->insert_record('zoomyt_meeting_recordings', $record);
-                mtrace('Recording id: ' . $recordingid . ' (' . $recordingtype . ') added to the database');
-
-                // Log the recording discovered event.
-                $cm = get_coursemodule_from_instance('zoomyt', $zoom->id, $zoom->course, false, IGNORE_MISSING);
-                if ($cm) {
-                    $context = \context_module::instance($cm->id);
-                    \mod_zoomyt\event\recording_discovered::create([
-                        'context' => $context,
-                        'objectid' => $record->id,
-                        'other' => [
-                            'meeting_name' => $zoom->name,
-                            'recording_type' => $recordingtype,
-                            'recording_id' => $recordingid,
-                        ],
-                    ])->trigger();
-                }
+                $this->insert_recording($zoom, $recordingid, $recording,
+                    $meetingpasscodes[$recording->meetinguuid], $now);
             }
         }
+
+        // Second pass: the user-level recordings API does not return
+        // audio_interpretation files, so query the per-meeting recordings endpoint
+        // for meetings with language interpretation enabled to pick them up.
+        foreach ($interpmeetings as $meetinguuid => $zoom) {
+            try {
+                $meetingrecordings = $service->get_recording_url_list($meetinguuid);
+            } catch (moodle_exception $error) {
+                mtrace('Could not fetch per-meeting recordings for UUID ' . $meetinguuid .
+                    ': ' . $error->getMessage());
+                continue;
+            }
+
+            foreach ($meetingrecordings as $recordingid => $recording) {
+                if ($recording->recordingtype !== 'audio_interpretation') {
+                    continue;
+                }
+
+                if (isset($localrecordings[$meetinguuid][$recordingid])) {
+                    $this->backfill_language($localrecordings[$meetinguuid][$recordingid], $recording, $now);
+                    continue;
+                }
+
+                $this->insert_recording($zoom, $recordingid, $recording, $recording->passcode, $now);
+            }
+        }
+    }
+
+    /**
+     * Insert a newly discovered Zoom recording and trigger the discovered event.
+     *
+     * @param stdClass $zoom The zoomyt activity record.
+     * @param string $recordingid Zoom recording file id.
+     * @param stdClass $recording Recording info from the webservice.
+     * @param string|null $passcode Recording passcode.
+     * @param int $now Current timestamp.
+     * @return void
+     */
+    private function insert_recording(stdClass $zoom, string $recordingid, stdClass $recording, $passcode, int $now): void {
+        global $DB;
+
+        $recordingtype = $recording->recordingtype;
+
+        $record = new stdClass();
+        $record->zoomid = $zoom->id;
+        $record->meetinguuid = $recording->meetinguuid;
+        $record->zoomrecordingid = $recordingid;
+        $record->name = $zoom->name;
+        $record->externalurl = $recording->url;
+        $record->passcode = $passcode;
+        $record->recordingtype = $recordingtype;
+        $record->recordingstart = $recording->recordingstart;
+        $record->showrecording = $zoom->recordings_visible_default;
+        $record->timecreated = $now;
+        $record->timemodified = $now;
+
+        // Derive the interpretation language from Zoom's file name, e.g.
+        // "Audio only - Interpretation (Português)" -> "pt".
+        if ($recordingtype === 'audio_interpretation' && !empty($recording->filename)) {
+            $lang = zoomyt_interp_filename_to_bcp47($recording->filename);
+            if ($lang !== null) {
+                $record->language = $lang;
+            }
+        }
+
+        $record->id = $DB->insert_record('zoomyt_meeting_recordings', $record);
+        mtrace('Recording id: ' . $recordingid . ' (' . $recordingtype . ')'
+            . (!empty($record->language) ? ' [language: ' . $record->language . ']' : '')
+            . ' added to the database');
+
+        // Log the recording discovered event.
+        $cm = get_coursemodule_from_instance('zoomyt', $zoom->id, $zoom->course, false, IGNORE_MISSING);
+        if ($cm) {
+            $context = \context_module::instance($cm->id);
+            \mod_zoomyt\event\recording_discovered::create([
+                'context' => $context,
+                'objectid' => $record->id,
+                'other' => [
+                    'meeting_name' => $zoom->name,
+                    'recording_type' => $recordingtype,
+                    'recording_id' => $recordingid,
+                ],
+            ])->trigger();
+        }
+    }
+
+    /**
+     * Backfill the interpretation language of an existing recording row from
+     * Zoom's file name when it has not been set yet.
+     *
+     * @param stdClass $localrecording Existing zoomyt_meeting_recordings row.
+     * @param stdClass $recording Recording info from the webservice.
+     * @param int $now Current timestamp.
+     * @return void
+     */
+    private function backfill_language(stdClass $localrecording, stdClass $recording, int $now): void {
+        global $DB;
+
+        if ($recording->recordingtype !== 'audio_interpretation'
+                || trim((string) ($localrecording->language ?? '')) !== ''
+                || empty($recording->filename)) {
+            return;
+        }
+
+        $lang = zoomyt_interp_filename_to_bcp47($recording->filename);
+        if ($lang === null) {
+            return;
+        }
+
+        $DB->update_record('zoomyt_meeting_recordings', (object) [
+            'id' => $localrecording->id,
+            'language' => $lang,
+            'timemodified' => $now,
+        ]);
+        $localrecording->language = $lang;
+        mtrace('Recording id: ' . $recording->recordingid . ' language set to ' . $lang .
+            ' from file name "' . $recording->filename . '"');
     }
 }

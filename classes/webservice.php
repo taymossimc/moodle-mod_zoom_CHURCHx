@@ -1513,6 +1513,7 @@ class webservice {
                     $recordinginfo->url = $url;
                     $recordinginfo->filetype = $recording->file_type;
                     $recordinginfo->recordingtype = $recording->recording_type ?? 'null';
+                    $recordinginfo->filename = $recording->file_name ?? '';
                     $recordinginfo->passcode = $response->password;
                     $recordinginfo->recordingstart = strtotime($recording->recording_start);
 
@@ -1564,6 +1565,7 @@ class webservice {
                         $recordinginfo->url = $url;
                         $recordinginfo->filetype = $recording->file_type;
                         $recordinginfo->recordingtype = $recording->recording_type ?? 'null';
+                        $recordinginfo->filename = $recording->file_name ?? '';
                         $recordinginfo->recordingstart = strtotime($recording->recording_start);
 
                         $recordings[$recording->id] = $recordinginfo;

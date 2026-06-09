@@ -37,6 +37,8 @@ require_once($CFG->dirroot . '/mod/zoomyt/locallib.php');
  * @covers ::zoomyt_moodle_lang_to_bcp47
  * @covers ::zoomyt_interp_code_to_bcp47
  * @covers ::zoomyt_get_activity_interpretation_languages
+ * @covers ::zoomyt_interp_language_name_to_bcp47
+ * @covers ::zoomyt_interp_filename_to_bcp47
  */
 final class multilang_audio_test extends advanced_testcase {
 
@@ -100,5 +102,33 @@ final class multilang_audio_test extends advanced_testcase {
         // Malformed JSON -> empty.
         $zoom = (object) ['interpretation_enable' => 1, 'interpretation_data' => 'not-json'];
         $this->assertSame([], zoomyt_get_activity_interpretation_languages($zoom));
+    }
+
+    /**
+     * Language display name (as used in Zoom file names) -> BCP-47 conversion.
+     */
+    public function test_interp_language_name_to_bcp47(): void {
+        $this->assertEquals('en', zoomyt_interp_language_name_to_bcp47('English'));
+        $this->assertEquals('pt', zoomyt_interp_language_name_to_bcp47('Português'));
+        $this->assertEquals('pt', zoomyt_interp_language_name_to_bcp47('Portuguese'));
+        $this->assertEquals('ja', zoomyt_interp_language_name_to_bcp47('日本語'));
+        $this->assertEquals('es', zoomyt_interp_language_name_to_bcp47('Español'));
+        $this->assertEquals('fr', zoomyt_interp_language_name_to_bcp47(' Français '));
+        $this->assertNull(zoomyt_interp_language_name_to_bcp47('Klingon'));
+    }
+
+    /**
+     * Deriving the language from Zoom interpretation recording file names.
+     */
+    public function test_interp_filename_to_bcp47(): void {
+        $this->assertEquals('en', zoomyt_interp_filename_to_bcp47('Audio only - Interpretation (English)'));
+        $this->assertEquals('pt', zoomyt_interp_filename_to_bcp47('Audio only - Interpretation (Português)'));
+        $this->assertEquals('ja', zoomyt_interp_filename_to_bcp47('Audio only - Interpretation (日本語)'));
+        // The last parenthesised group wins.
+        $this->assertEquals('es', zoomyt_interp_filename_to_bcp47('My meeting (test) - Interpretation (Español)'));
+        // Unknown language or no parentheses -> null.
+        $this->assertNull(zoomyt_interp_filename_to_bcp47('Audio only - Interpretation (Klingon)'));
+        $this->assertNull(zoomyt_interp_filename_to_bcp47('Audio only'));
+        $this->assertNull(zoomyt_interp_filename_to_bcp47(''));
     }
 }

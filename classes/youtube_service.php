@@ -562,9 +562,11 @@ class youtube_service {
         $token = $this->get_access_token();
         $filesize = filesize($filepath);
 
-        $metadata = ['snippet' => []];
+        // Encode as objects: an empty PHP array would serialise to a JSON list,
+        // which the API rejects ("Proto field is not repeating, cannot start list").
+        $metadata = new \stdClass();
         if ($name !== '') {
-            $metadata['snippet']['name'] = substr($name, 0, 100);
+            $metadata->snippet = (object) ['name' => substr($name, 0, 100)];
         }
 
         // Step 1: Initialize resumable upload.

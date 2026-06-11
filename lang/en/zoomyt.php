@@ -704,6 +704,7 @@ $string['title'] = 'Title';
 $string['captions_available'] = 'Captions available';
 $string['session_recordings'] = 'Session Recordings';
 $string['sessions_uploaded_youtube'] = 'Sessions Uploaded to YouTube';
+$string['feature_not_available'] = 'ZoomYT is not included in your partner plan. Please contact CHURCHx to upgrade your subscription.';
 $string['next_meeting'] = 'Next Meeting: {$a}';
 $string['view_recorded_sessions'] = 'View Recorded Sessions';
 $string['no_scheduled_meetings'] = 'No scheduled meetings';

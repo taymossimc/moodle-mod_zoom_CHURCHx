@@ -59,6 +59,43 @@ function zoomyt_supports($feature) {
 }
 
 /**
+ * Checks whether the partner owning this course is entitled to the ZoomYT feature
+ * (tier-based gating with admin overrides, managed by local_partner).
+ *
+ * Existing activities are grandfathered: this is only consulted when creating new
+ * instances and by background provisioning.
+ *
+ * @param int $courseid Course ID.
+ * @return bool
+ */
+function zoomyt_is_available_for_course($courseid) {
+    // The gate lives in local_partner; if that plugin is absent, ZoomYT is ungated.
+    if (!class_exists('\local_partner\Features')) {
+        return true;
+    }
+    return \local_partner\Features::is_available_for_course(\local_partner\Features::ZOOMYT, (int) $courseid);
+}
+
+/**
+ * Controls whether ZoomYT appears in the activity chooser for a given course.
+ *
+ * Hides the module from the chooser when the course's partner is not entitled
+ * to the ZoomYT feature.
+ *
+ * @param \core_course\local\entity\content_item $defaultmodulecontentitem Default content item for the module.
+ * @param stdClass $user The user, for capability checks.
+ * @param stdClass $course The course to scope items to.
+ * @return array The array of content items.
+ */
+function zoomyt_get_course_content_items(\core_course\local\entity\content_item $defaultmodulecontentitem,
+        stdClass $user, stdClass $course) {
+    if (!zoomyt_is_available_for_course($course->id)) {
+        return [];
+    }
+    return [$defaultmodulecontentitem];
+}
+
+/**
  * Saves a new instance of the zoom object into the database.
  *
  * Given an object containing all the necessary data (defined by the form in mod_form.php), this function
@@ -77,6 +114,11 @@ function zoomyt_add_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = null)
         zoomyt_grade_item_update($zoom);
         zoomyt_calendar_item_update($zoom);
         return $zoom->id;
+    }
+
+    // Tier-based feature gating: block creation when the course's partner is not entitled.
+    if (!zoomyt_is_available_for_course($zoom->course)) {
+        throw new moodle_exception('feature_not_available', 'mod_zoomyt');
     }
 
     // Deals with password manager issues.

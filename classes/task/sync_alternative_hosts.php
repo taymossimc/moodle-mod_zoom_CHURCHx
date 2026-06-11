@@ -82,6 +82,14 @@ class sync_alternative_hosts extends scheduled_task {
             mtrace("Processing Zoom meeting: {$zoom->name} (ID: {$zoom->meeting_id})");
 
             try {
+                // Tier-based feature gating: don't provision Zoom users (which sends
+                // invitation emails) for partners not entitled to ZoomYT.
+                if (!zoomyt_is_available_for_course($zoom->course)) {
+                    mtrace("  => Partner of course {$zoom->course} is not entitled to ZoomYT, skipping.");
+                    $skippedcount++;
+                    continue;
+                }
+
                 // Get instructor emails for this course.
                 $instructoremails = zoomyt_get_course_instructor_emails($zoom->course);
 

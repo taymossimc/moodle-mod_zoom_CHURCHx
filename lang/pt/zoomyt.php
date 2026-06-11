@@ -676,6 +676,7 @@ $string['title'] = 'Título';
 $string['captions_available'] = 'Legendas disponíveis';
 $string['session_recordings'] = 'Gravações da sessão';
 $string['sessions_uploaded_youtube'] = 'Sessões enviadas para o YouTube';
+$string['feature_not_available'] = 'O ZoomYT não está incluído no seu plano de parceiro. Contacte a CHURCHx para atualizar a sua subscrição.';
 $string['next_meeting'] = 'Próxima reunião: {$a}';
 $string['view_recorded_sessions'] = 'Ver sessões gravadas';
 $string['no_scheduled_meetings'] = 'Nenhuma reunião agendada';

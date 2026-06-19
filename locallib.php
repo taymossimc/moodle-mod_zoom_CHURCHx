@@ -606,6 +606,224 @@ function zoomyt_notify_custom_sync_result(array $result): void {
 }
 
 /**
+ * Transfer the meeting host of an activity to another user, by email.
+ *
+ * Upcoming Zoom session(s) are recreated under the new host's account and the
+ * old upcoming session(s) are deleted from Zoom. Sessions that have already
+ * ended are never touched, so their recordings and reports stay intact:
+ *  - Custom-dates activities: only future/in-progress per-session meetings are
+ *    moved; past occurrences keep their original meeting IDs.
+ *  - Regular activities: the meeting is recreated under the new host (a fully
+ *    ended, non-recurring meeting is refused since there is nothing to move).
+ *
+ * If the target user has no Zoom account yet, one is auto-created where the
+ * site config allows it (a pending invitation cannot host, so the transfer is
+ * refused with a friendly message until they activate).
+ *
+ * The $zoom object is mutated in place (host_id, meeting_id, join_url,
+ * alternative_hosts) and the zoomyt DB record is updated.
+ *
+ * @param stdClass $zoom Activity record with current form data (id, course, meeting_id, option_* fields).
+ * @param string $newhostemail Email of the user to transfer the host role to.
+ * @return array ['success' => bool, 'moved' => int, 'errors' => string[], 'message' => string]
+ */
+function zoomyt_transfer_host(stdClass $zoom, string $newhostemail): array {
+    global $DB;
+
+    $newhostemail = core_text::strtolower(trim($newhostemail));
+    $result = ['success' => false, 'moved' => 0, 'errors' => [], 'message' => ''];
+    $now = time();
+
+    // No-op when the target is already the host.
+    try {
+        $currenthost = zoomyt_get_user($zoom->host_id);
+        if ($currenthost && strcasecmp($currenthost->email ?? '', $newhostemail) === 0) {
+            $result['success'] = true;
+            return $result;
+        }
+    } catch (\Exception $e) {
+        // Current host unresolvable; proceed with the transfer anyway.
+        $currenthost = null;
+    }
+
+    $iscustom = !empty($zoom->recurring) && (int) ($zoom->recurrence_type ?? 0) === ZOOM_RECURRINGTYPE_CUSTOM;
+
+    // Refuse when there is nothing upcoming to move.
+    $occurrences = [];
+    if ($iscustom) {
+        $occurrences = $DB->get_records('zoomyt_custom_occurrences', ['zoomid' => $zoom->id], 'start_time ASC');
+        $hasupcoming = false;
+        foreach ($occurrences as $occ) {
+            if (($occ->start_time + $occ->duration * 60) >= $now) {
+                $hasupcoming = true;
+                break;
+            }
+        }
+        if (!$hasupcoming) {
+            $result['message'] = get_string('transferhost_nothingupcoming', 'zoomyt');
+            return $result;
+        }
+    } else if (empty($zoom->recurring) && ((int) ($zoom->start_time ?? 0) + (int) ($zoom->duration ?? 0)) < $now) {
+        $result['message'] = get_string('transferhost_nothingupcoming', 'zoomyt');
+        return $result;
+    }
+
+    // Make sure the new host has an active Zoom account (auto-creates and licenses where allowed).
+    if (!zoomyt_ensure_zoom_user($newhostemail, (int) $zoom->course)) {
+        $result['message'] = get_string('transferhost_failed_noaccount', 'zoomyt', $newhostemail);
+        return $result;
+    }
+    try {
+        $newhost = zoomyt_get_user($newhostemail);
+    } catch (\Exception $e) {
+        $newhost = null;
+    }
+    if (empty($newhost->id) || (($newhost->status ?? '') === 'pending')) {
+        $result['message'] = get_string('transferhost_failed_noaccount', 'zoomyt', $newhostemail);
+        return $result;
+    }
+
+    $service = zoomyt_webservice();
+    $oldhostid = $zoom->host_id;
+
+    // The host cannot be an alternative host of their own meeting.
+    if (!empty($zoom->alternative_hosts)) {
+        $zoom->alternative_hosts = zoomyt_remove_alt_host($zoom->alternative_hosts, $newhostemail);
+    }
+
+    $zoom->host_id = $newhost->id;
+
+    if ($iscustom) {
+        foreach ($occurrences as $occ) {
+            if (($occ->start_time + $occ->duration * 60) < $now) {
+                // Past session: keep its original Zoom meeting so recordings/reports stay intact.
+                continue;
+            }
+            if (empty($occ->meeting_id) || empty($occ->exists_on_zoom)) {
+                // No live meeting yet; the regular sync will create it under the new host.
+                continue;
+            }
+
+            try {
+                $response = zoomyt_create_occurrence_with_retry($zoom, (int) $occ->start_time, (int) $occ->duration * 60);
+            } catch (moodle_exception $e) {
+                $result['errors'][] = userdate($occ->start_time) . ': ' . $e->getMessage();
+                continue;
+            }
+
+            // Remove the replaced upcoming meeting from Zoom.
+            try {
+                $service->delete_meeting($occ->meeting_id, $zoom->webinar);
+            } catch (moodle_exception $e) {
+                if (!(isset($e->zoomerrorcode) && zoomyt_is_meeting_gone_error($e))) {
+                    $result['errors'][] = userdate($occ->start_time) . ': ' . $e->getMessage();
+                }
+            }
+
+            $occ->meeting_id = $response->id ?? null;
+            $occ->join_url = $response->join_url ?? null;
+            $occ->exists_on_zoom = !empty($response->id) ? 1 : 0;
+            $occ->timemodified = $now;
+            $DB->update_record('zoomyt_custom_occurrences', $occ);
+            $result['moved']++;
+        }
+
+        if ($result['moved'] === 0) {
+            // Nothing was transferred; keep the original host.
+            $zoom->host_id = $oldhostid;
+            $result['message'] = get_string('transferhost_failed', 'zoomyt', $newhostemail);
+            return $result;
+        }
+
+        $DB->set_field('zoomyt', 'host_id', $zoom->host_id, ['id' => $zoom->id]);
+        $DB->set_field('zoomyt', 'alternative_hosts', $zoom->alternative_hosts ?? '', ['id' => $zoom->id]);
+        zoomyt_apply_custom_representative($zoom);
+    } else {
+        $oldmeetingid = $zoom->meeting_id;
+
+        try {
+            $response = zoomyt_create_meeting_with_alt_host_retry($zoom);
+        } catch (moodle_exception $e) {
+            $zoom->host_id = $oldhostid;
+            $result['errors'][] = $e->getMessage();
+            $result['message'] = get_string('transferhost_failed', 'zoomyt', $newhostemail);
+            return $result;
+        }
+
+        // Remove the replaced meeting from Zoom only after the new one exists.
+        try {
+            $service->delete_meeting($oldmeetingid, $zoom->webinar);
+        } catch (moodle_exception $e) {
+            if (!(isset($e->zoomerrorcode) && zoomyt_is_meeting_gone_error($e))) {
+                $result['errors'][] = $e->getMessage();
+            }
+        }
+
+        $updated = populate_zoomyt_from_response($zoom, $response);
+        foreach (get_object_vars($updated) as $field => $value) {
+            $zoom->$field = $value;
+        }
+        $zoom->timemodified = time();
+        $DB->update_record('zoomyt', $zoom);
+        $result['moved'] = 1;
+    }
+
+    zoomyt_provision_log('transfer_host', 'ok',
+        "Transferred host of zoomyt {$zoom->id} from {$oldhostid} to {$newhost->id}; moved {$result['moved']} meeting(s)",
+        $newhostemail, null, (int) $zoom->course);
+
+    $result['success'] = true;
+    $result['message'] = get_string('transferhost_success', 'zoomyt', $newhostemail);
+    return $result;
+}
+
+/**
+ * Validate manually-entered alternative hosts before sending them to Zoom.
+ *
+ * Each email is run through zoomyt_ensure_zoom_user(), which auto-creates the
+ * Zoom account (and sends an invitation) where the site config allows it.
+ * Emails that still cannot be used (pending invitation, registered on another
+ * Zoom account, creation disabled) are removed from the list so the Zoom API
+ * call does not fail the whole save; the caller can surface them via
+ * zoomyt_notify_dropped_alternative_hosts().
+ *
+ * @param stdClass $zoom Activity object; alternative_hosts is rewritten in place.
+ * @return string[] Emails that were dropped from the list.
+ */
+function zoomyt_sanitize_alternative_hosts(stdClass $zoom): array {
+    $emails = zoomyt_get_alternative_host_array_from_string($zoom->alternative_hosts ?? '');
+
+    $kept = [];
+    $dropped = [];
+    foreach ($emails as $email) {
+        $email = core_text::strtolower(trim($email));
+        if ($email === '' || in_array($email, $kept)) {
+            continue;
+        }
+        if (zoomyt_ensure_zoom_user($email, (int) $zoom->course)) {
+            $kept[] = $email;
+        } else {
+            $dropped[] = $email;
+        }
+    }
+
+    $zoom->alternative_hosts = implode(',', $kept);
+    return $dropped;
+}
+
+/**
+ * Show a friendly notice for alternative hosts that could not be added yet.
+ *
+ * @param array $dropped Emails removed by zoomyt_sanitize_alternative_hosts().
+ */
+function zoomyt_notify_dropped_alternative_hosts(array $dropped): void {
+    if (empty($dropped)) {
+        return;
+    }
+    \core\notification::info(get_string('althosts_dropped', 'zoomyt', implode(', ', $dropped)));
+}
+
+/**
  * Resolve a Zoom meeting ID to its parent zoomyt activity.
  *
  * Checks the activity's own meeting_id first, then per-session custom-dates

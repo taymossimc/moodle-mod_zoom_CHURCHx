@@ -76,6 +76,13 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
         require_once($CFG->dirroot . '/mod/zoomyt/classes/youtube_service.php');
         require_once($CFG->dirroot . '/mod/zoomyt/classes/category_settings.php');
 
+        // Downloading a recording from Zoom and uploading it to YouTube can take
+        // a long time for multi-hour sessions. Lift the time and memory limits so
+        // the job is not cut short. These are no-ops under CLI/cron (the normal
+        // execution path) but protect any web-context fallback.
+        \core\php_time_limit::raise(60 * 60 * 12);
+        raise_memory_limit(MEMORY_EXTRA);
+
         mtrace('Starting Zoom to YouTube sync task...');
 
         // Get temp directory and check space.

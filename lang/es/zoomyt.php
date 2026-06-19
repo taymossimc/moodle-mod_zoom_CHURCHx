@@ -595,6 +595,15 @@ $string['captions_available'] = 'Subtítulos disponibles';
 $string['session_recordings'] = 'Grabaciones de sesión';
 $string['sessions_uploaded_youtube'] = 'Sesiones subidas a YouTube';
 $string['feature_not_available'] = 'ZoomYT no está incluido en su plan de socio. Comuníquese con CHURCHx para actualizar su suscripción.';
+$string['hosts'] = 'Anfitriones';
+$string['transferhost'] = 'Transferir anfitrión a';
+$string['transferhost_help'] = 'Transfiere la propiedad de esta reunión a otro docente. Las sesiones de Zoom futuras se recrean en la cuenta de Zoom del nuevo anfitrión y las sesiones futuras reemplazadas se eliminan de Zoom. Las sesiones que ya tuvieron lugar, incluidas sus grabaciones e informes, no se ven afectadas. Si el docente elegido aún no tiene una cuenta de Zoom, se crea automáticamente cuando es posible.';
+$string['transferhost_keep'] = 'Mantener el anfitrión actual';
+$string['transferhost_success'] = 'Anfitrión de la reunión transferido a {$a}. Las sesiones futuras de Zoom se recrearon con el nuevo anfitrión; las sesiones pasadas no se modificaron.';
+$string['transferhost_failed'] = 'No se pudo transferir el anfitrión de la reunión a {$a}.';
+$string['transferhost_failed_noaccount'] = '{$a} aún no tiene una cuenta de Zoom activa, por lo que el anfitrión no se cambió. Si acaba de recibir un correo de invitación de Zoom, pídale que la acepte e inténtelo de nuevo.';
+$string['transferhost_nothingupcoming'] = 'El anfitrión no se cambió porque esta reunión ya finalizó.';
+$string['althosts_dropped'] = 'Estos anfitriones alternativos aún no tienen una cuenta de Zoom activa y se omitieron: {$a}. Cuando fue posible, se envió una invitación de Zoom y se agregarán automáticamente cuando su cuenta esté activa.';
 $string['next_meeting'] = 'Próxima reunión: {$a}';
 $string['view_recorded_sessions'] = 'Ver sesiones grabadas';
 $string['no_scheduled_meetings'] = 'Sin reuniones programadas';
@@ -619,6 +628,7 @@ $string['sync_recordings_error'] = 'Error al buscar grabaciones: {$a}';
 $string['sync_reports_success'] = 'Se obtuvieron correctamente los datos de sesión de Zoom.';
 $string['sync_reports_error'] = 'Error al obtener los informes de reunión: {$a}';
 $string['sync_youtube_success'] = 'Sincronización con YouTube iniciada correctamente.';
+$string['sync_youtube_queued'] = 'La sincronización con YouTube se ha puesto en cola. Las grabaciones se descargan y se suben en segundo plano, lo que puede tardar varios minutos en sesiones largas. Actualice esta página para ver el progreso.';
 $string['sync_youtube_error'] = 'Error al sincronizar con YouTube: {$a}';
 $string['activity_video_visibility'] = 'Visibilidad de video predeterminada';
 $string['activity_video_visibility_help'] = 'Si los videos cargados desde esta actividad deben estar listados o no listados en YouTube.';
@@ -707,6 +717,7 @@ $string['event_meeting_updated'] = 'Reunión actualizada';
 // Retry upload strings.
 $string['retry_upload'] = 'Reintentar Subida';
 $string['retry_upload_success'] = 'Reintento de subida a YouTube completado exitosamente.';
+$string['retry_upload_queued'] = 'El reintento de subida se ha puesto en cola. La grabación se volverá a procesar en segundo plano. Actualice esta página para ver el progreso.';
 $string['retry_upload_error'] = 'Reintento de subida a YouTube falló: {$a}';
 
 // Recurrencia personalizada e interpretación (v2.6.16).

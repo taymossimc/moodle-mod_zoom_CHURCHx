@@ -585,6 +585,24 @@ $string['youtube_not_configured'] = 'YouTube is not configured for this category
 $string['youtube_credentials_required'] = 'Please enter YouTube Client ID and Client Secret before connecting.';
 $string['youtube_oauth_error'] = 'YouTube OAuth error: {$a}';
 $string['youtube_oauth_state_mismatch'] = 'Security validation failed. Please try again.';
+$string['oauth_alert_enabled'] = 'Email admin on YouTube OAuth failure';
+$string['oauth_alert_enabled_desc'] = 'When enabled, an email alert is sent to the address below whenever a YouTube OAuth token refresh fails (for example, the refresh token has been revoked or has expired). Until the channel is reconnected, recordings cannot upload. Alerts are throttled to at most one per connection every few hours so a repeatedly failing task does not flood the inbox.';
+$string['oauth_alert_email'] = 'OAuth failure alert email';
+$string['oauth_alert_email_desc'] = 'The email address that receives YouTube OAuth failure alerts. Defaults to the system administrator.';
+$string['oauth_alert_subject'] = '[{$a->site}] YouTube OAuth error - recordings are not uploading';
+$string['oauth_alert_body'] = 'A YouTube authorization (OAuth) error occurred on {$a->site} ({$a->wwwroot}).
+
+Connection: {$a->level}
+Error: {$a->error}
+Time: {$a->time}
+
+Zoom recordings will not upload to YouTube until this YouTube channel is reconnected. Please reauthorise the connection here:
+{$a->reconnecturl}
+
+This is an automated message from the Zoom YT plugin.';
+$string['oauth_alert_level_site'] = 'Site-wide default YouTube channel';
+$string['oauth_alert_level_category'] = 'Course category: {$a}';
+$string['oauth_alert_recipient_name'] = 'Administrator';
 $string['youtube_api_error'] = 'YouTube API error: {$a}';
 $string['youtube_no_channel'] = 'No YouTube channel found for this account.';
 $string['youtube_video_not_found'] = 'YouTube video not found: {$a}';
@@ -705,6 +723,15 @@ $string['captions_available'] = 'Captions available';
 $string['session_recordings'] = 'Session Recordings';
 $string['sessions_uploaded_youtube'] = 'Sessions Uploaded to YouTube';
 $string['feature_not_available'] = 'ZoomYT is not included in your partner plan. Please contact CHURCHx to upgrade your subscription.';
+$string['hosts'] = 'Hosts';
+$string['transferhost'] = 'Transfer host to';
+$string['transferhost_help'] = 'Transfers ownership of this meeting to another teacher. Upcoming Zoom session(s) are recreated under the new host\'s Zoom account and the replaced upcoming session(s) are removed from Zoom. Sessions that already took place, including their recordings and reports, are not affected. If the chosen teacher does not yet have a Zoom account, one is created automatically where possible.';
+$string['transferhost_keep'] = 'Keep current host';
+$string['transferhost_success'] = 'Meeting host transferred to {$a}. Upcoming Zoom sessions were recreated under the new host; past sessions were left untouched.';
+$string['transferhost_failed'] = 'Could not transfer the meeting host to {$a}.';
+$string['transferhost_failed_noaccount'] = '{$a} does not have an active Zoom account yet, so the host was not changed. If they just received a Zoom invitation email, ask them to accept it and then try again.';
+$string['transferhost_nothingupcoming'] = 'The host was not changed because this meeting has already ended.';
+$string['althosts_dropped'] = 'These alternative hosts do not have an active Zoom account yet and were skipped: {$a}. Where possible, a Zoom invitation was sent and they will be added automatically once their account is active.';
 $string['next_meeting'] = 'Next Meeting: {$a}';
 $string['view_recorded_sessions'] = 'View Recorded Sessions';
 $string['no_scheduled_meetings'] = 'No scheduled meetings';
@@ -730,6 +757,7 @@ $string['sync_reports_success'] = 'Successfully fetched meeting session data fro
 $string['sync_reports_error'] = 'Error fetching meeting reports: {$a}';
 $string['sync_youtube_success'] = 'Successfully triggered YouTube sync.';
 $string['sync_youtube_error'] = 'Error syncing to YouTube: {$a}';
+$string['sync_youtube_queued'] = 'YouTube sync has been queued. Recordings are downloaded and uploaded in the background, which can take several minutes for long sessions. Refresh this page to check progress.';
 $string['activity_video_visibility'] = 'Default video visibility';
 $string['activity_video_visibility_help'] = 'Whether videos uploaded from this activity should be listed or unlisted on YouTube.';
 
@@ -791,6 +819,7 @@ $string['event_meeting_updated'] = 'Meeting updated';
 $string['retry_upload'] = 'Retry Upload';
 $string['retry_upload_success'] = 'YouTube upload retry completed successfully.';
 $string['retry_upload_error'] = 'YouTube upload retry failed: {$a}';
+$string['retry_upload_queued'] = 'Upload retry has been queued. The recording will be re-processed in the background. Refresh this page to check progress.';
 
 // Custom recurrence & interpretation (v2.6.16+).
 $string['recurrence_option_custom'] = 'Custom dates (session list)';

@@ -595,6 +595,15 @@ $string['captions_available'] = 'Sous-titres disponibles';
 $string['session_recordings'] = 'Enregistrements de session';
 $string['sessions_uploaded_youtube'] = 'Sessions téléversées sur YouTube';
 $string['feature_not_available'] = 'ZoomYT n\'est pas inclus dans votre forfait partenaire. Veuillez contacter CHURCHx pour mettre à niveau votre abonnement.';
+$string['hosts'] = 'Animateurs';
+$string['transferhost'] = 'Transférer l\'animateur à';
+$string['transferhost_help'] = 'Transfère la propriété de cette réunion à un autre enseignant. Les séances Zoom à venir sont recréées sous le compte Zoom du nouvel animateur et les anciennes séances à venir sont supprimées de Zoom. Les séances déjà passées, y compris leurs enregistrements et rapports, ne sont pas affectées. Si l\'enseignant choisi n\'a pas encore de compte Zoom, un compte est créé automatiquement lorsque c\'est possible.';
+$string['transferhost_keep'] = 'Conserver l\'animateur actuel';
+$string['transferhost_success'] = 'Animateur de la réunion transféré à {$a}. Les séances Zoom à venir ont été recréées sous le nouvel animateur; les séances passées n\'ont pas été modifiées.';
+$string['transferhost_failed'] = 'Impossible de transférer l\'animateur de la réunion à {$a}.';
+$string['transferhost_failed_noaccount'] = '{$a} n\'a pas encore de compte Zoom actif, l\'animateur n\'a donc pas été changé. S\'il vient de recevoir un courriel d\'invitation Zoom, demandez-lui de l\'accepter puis réessayez.';
+$string['transferhost_nothingupcoming'] = 'L\'animateur n\'a pas été changé parce que cette réunion est déjà terminée.';
+$string['althosts_dropped'] = 'Ces animateurs suppléants n\'ont pas encore de compte Zoom actif et ont été ignorés : {$a}. Lorsque c\'était possible, une invitation Zoom a été envoyée et ils seront ajoutés automatiquement une fois leur compte actif.';
 $string['next_meeting'] = 'Prochaine réunion : {$a}';
 $string['view_recorded_sessions'] = 'Voir les sessions enregistrées';
 $string['no_scheduled_meetings'] = 'Aucune réunion prévue';
@@ -619,6 +628,7 @@ $string['sync_recordings_error'] = 'Erreur lors de la recherche d\'enregistremen
 $string['sync_reports_success'] = 'Données de session Zoom récupérées avec succès.';
 $string['sync_reports_error'] = 'Erreur lors de la récupération des rapports de réunion : {$a}';
 $string['sync_youtube_success'] = 'Synchronisation YouTube lancée avec succès.';
+$string['sync_youtube_queued'] = 'La synchronisation YouTube a été mise en file d\'attente. Les enregistrements sont téléchargés puis téléversés en arrière-plan, ce qui peut prendre plusieurs minutes pour les longues sessions. Actualisez cette page pour suivre la progression.';
 $string['sync_youtube_error'] = 'Erreur lors de la synchronisation avec YouTube : {$a}';
 $string['activity_video_visibility'] = 'Visibilité vidéo par défaut';
 $string['activity_video_visibility_help'] = 'Si les vidéos téléchargées depuis cette activité doivent être répertoriées ou non répertoriées sur YouTube.';
@@ -707,6 +717,7 @@ $string['event_meeting_updated'] = 'Réunion mise à jour';
 // Retry upload strings.
 $string['retry_upload'] = 'Réessayer le Téléversement';
 $string['retry_upload_success'] = 'Réessai du téléversement YouTube terminé avec succès.';
+$string['retry_upload_queued'] = 'Le réessai du téléversement a été mis en file d\'attente. L\'enregistrement sera retraité en arrière-plan. Actualisez cette page pour suivre la progression.';
 $string['retry_upload_error'] = 'Réessai du téléversement YouTube échoué: {$a}';
 
 // Récurrence personnalisée et interprétation (v2.6.16).

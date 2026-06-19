@@ -819,6 +819,27 @@ if ($ADMIN->fulltree) {
         $visibilityoptions
     ));
 
+    // Alert the administrator by email when a YouTube OAuth token refresh fails.
+    $settings->add(new admin_setting_configcheckbox(
+        'zoomyt/oauth_alert_enabled',
+        get_string('oauth_alert_enabled', 'zoomyt'),
+        get_string('oauth_alert_enabled_desc', 'zoomyt'),
+        1,
+        1,
+        0
+    ));
+
+    $settings->add(new admin_setting_configtext(
+        'zoomyt/oauth_alert_email',
+        get_string('oauth_alert_email', 'zoomyt'),
+        get_string('oauth_alert_email_desc', 'zoomyt'),
+        'imc@tucc.ca',
+        PARAM_EMAIL
+    ));
+    if ($moodlehashideif) {
+        $settings->hide_if('zoomyt/oauth_alert_email', 'zoomyt/oauth_alert_enabled', 'eq', 0);
+    }
+
     // Zoom recording delete days (global default).
     $deleteoptions = [
         '' => get_string('never_delete', 'zoomyt'),

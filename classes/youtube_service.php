@@ -292,6 +292,7 @@ class youtube_service {
         $response = $curl->post(self::TOKEN_URL, $data);
 
         if ($curl->get_errno()) {
+            $this->notify_oauth_failure($curl->error);
             throw new \moodle_exception('youtube_oauth_error', 'zoomyt', '', $curl->error);
         }
 
@@ -301,7 +302,9 @@ class youtube_service {
             // Purge any stale cached token so a reauthorized refresh token is used next time.
             $cache->delete($cachekey);
             $cache->delete($expireskey);
-            throw new \moodle_exception('youtube_oauth_error', 'zoomyt', '', $result->error_description ?? $result->error);
+            $errordetail = $result->error_description ?? $result->error;
+            $this->notify_oauth_failure($errordetail);
+            throw new \moodle_exception('youtube_oauth_error', 'zoomyt', '', $errordetail);
         }
 
         $this->accesstoken = $result->access_token;
@@ -311,6 +314,91 @@ class youtube_service {
         $cache->set($expireskey, $expires);
 
         return $this->accesstoken;
+    }
+
+    /**
+     * Email the configured administrator when a YouTube OAuth token refresh fails.
+     *
+     * A revoked or expired refresh token makes every subsequent upload fail until
+     * the channel is reconnected, so the admin needs to know. Alerts are throttled
+     * per connection (site or category) so a repeatedly failing scheduled task does
+     * not flood the inbox.
+     *
+     * @param string $errordetail The error detail returned by Google / cURL.
+     * @return void
+     */
+    protected function notify_oauth_failure(string $errordetail): void {
+        global $CFG, $DB, $SITE;
+
+        // Respect the on/off switch (unset == enabled by default).
+        if (get_config('zoomyt', 'oauth_alert_enabled') === '0') {
+            return;
+        }
+
+        $email = trim((string)get_config('zoomyt', 'oauth_alert_email'));
+        if ($email === '') {
+            $email = 'imc@tucc.ca';
+        }
+
+        // Throttle: at most one alert per connection per window.
+        $throttle = 6 * HOURSECS;
+        $key = 'oauth_alert_last_' . ($this->categoryid ?? 'site');
+        $last = (int)get_config('zoomyt', $key);
+        $now = time();
+        if ($last && ($now - $last) < $throttle) {
+            return;
+        }
+
+        // Identify which connection failed and where to reconnect it.
+        if (!empty($this->categoryid)) {
+            $categoryname = $DB->get_field('course_categories', 'name', ['id' => $this->categoryid]);
+            $level = get_string('oauth_alert_level_category', 'zoomyt', $categoryname ?: $this->categoryid);
+            $reconnecturl = (new \moodle_url('/mod/zoomyt/categorylist.php'))->out(false);
+        } else {
+            $level = get_string('oauth_alert_level_site', 'zoomyt');
+            $reconnecturl = (new \moodle_url('/mod/zoomyt/youtube_oauth_site.php'))->out(false);
+        }
+
+        $a = (object) [
+            'site' => format_string($SITE->fullname),
+            'wwwroot' => $CFG->wwwroot,
+            'level' => $level,
+            'error' => $errordetail,
+            'time' => userdate($now),
+            'reconnecturl' => $reconnecturl,
+        ];
+
+        $subject = get_string('oauth_alert_subject', 'zoomyt', $a);
+        $body = get_string('oauth_alert_body', 'zoomyt', $a);
+
+        // Prefer a real Moodle account with that email; otherwise build a minimal
+        // recipient object that email_to_user() can use.
+        $recipient = $DB->get_record('user', ['email' => $email, 'deleted' => 0], '*', IGNORE_MULTIPLE);
+        if (!$recipient) {
+            $recipient = clone \core_user::get_support_user();
+            $recipient->id = -1;
+            $recipient->email = $email;
+            $recipient->firstname = get_string('oauth_alert_recipient_name', 'zoomyt');
+            $recipient->lastname = '';
+            $recipient->maildisplay = 1;
+            $recipient->mailformat = 1;
+            $recipient->emailstop = 0;
+            $recipient->deleted = 0;
+            $recipient->suspended = 0;
+            $recipient->auth = 'manual';
+        }
+
+        $from = \core_user::get_support_user();
+
+        // Record the attempt time first so a send failure can't cause a tight loop.
+        set_config($key, $now, 'zoomyt');
+
+        try {
+            email_to_user($recipient, $from, $subject, $body);
+            mtrace('  [zoomyt] Sent YouTube OAuth failure alert to ' . $email);
+        } catch (\Exception $e) {
+            mtrace('  [zoomyt] Could not send YouTube OAuth failure alert: ' . $e->getMessage());
+        }
     }
 
     /**

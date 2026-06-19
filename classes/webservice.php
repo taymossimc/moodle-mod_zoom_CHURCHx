@@ -550,16 +550,49 @@ class webservice {
     }
 
     /**
-     * Gets the ID of the user, of all the paid users, with the oldest last login time.
+     * Gets the ID of the paid user who has gone the longest without actually using Zoom.
+     *
+     * "Usage" is measured by real activity, not by account age or portal sign-ins:
+     *  - the most recent meeting the user actually hosted (from the locally stored
+     *    meeting reports in {zoomyt_meeting_details}, keyed by the activity host_id), and
+     *  - Zoom's last_login_time as a secondary signal.
+     * The most recent of those two is taken as the user's "last used" time, and the
+     * user with the oldest "last used" time is returned for recycling.
+     *
+     * This avoids demoting an actively-teaching host who starts meetings via the
+     * start URL without ever signing in to the Zoom client (which leaves
+     * last_login_time stale and previously made them look idle).
      *
      * @return string|false If user is found, returns the User ID. Otherwise, returns false.
      */
     private function get_least_recently_active_paid_user_id() {
+        global $DB;
+
         $usertimes = [];
 
         // Classic: user:read:admin.
         // Granular: user:read:list_users:admin.
         $userslist = $this->list_users();
+
+        // Map of host Zoom user id => most recent actual meeting start time, taken
+        // from the meeting reports the plugin has already collected locally.
+        $lastusagebyhost = [];
+        try {
+            $rows = $DB->get_records_sql(
+                "SELECT z.host_id AS hostid, MAX(d.start_time) AS lastused
+                   FROM {zoomyt_meeting_details} d
+                   JOIN {zoomyt} z ON z.id = d.zoomid
+                  GROUP BY z.host_id"
+            );
+            foreach ($rows as $row) {
+                if (!empty($row->hostid)) {
+                    $lastusagebyhost[$row->hostid] = (int) $row->lastused;
+                }
+            }
+        } catch (\Exception $e) {
+            // If the local usage data is unavailable, fall back to last_login_time only.
+            $lastusagebyhost = [];
+        }
 
         foreach ($userslist as $user) {
             // Skip Basic user accounts.
@@ -572,15 +605,23 @@ class webservice {
                 continue;
             }
 
-            // We need the login time.
-            if (!isset($user->last_login_time)) {
+            // Count the user only if we're including all users or if the user is on this instance.
+            if ($this->instanceusers && !core_user::get_user_by_email($user->email)) {
                 continue;
             }
 
-            // Count the user only if we're including all users or if the user is on this instance.
-            if (!$this->instanceusers || core_user::get_user_by_email($user->email)) {
-                $usertimes[$user->id] = strtotime($user->last_login_time);
+            // Determine the most recent real-usage signal for this user. A user with
+            // no recorded usage at all is treated as least-recently-used (0) so genuinely
+            // idle accounts are recycled before active ones.
+            $lastused = 0;
+            if (isset($lastusagebyhost[$user->id])) {
+                $lastused = $lastusagebyhost[$user->id];
             }
+            if (!empty($user->last_login_time)) {
+                $lastused = max($lastused, strtotime($user->last_login_time));
+            }
+
+            $usertimes[$user->id] = $lastused;
         }
 
         if (!empty($usertimes)) {

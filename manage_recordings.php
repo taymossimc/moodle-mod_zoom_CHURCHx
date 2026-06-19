@@ -120,64 +120,40 @@ if ($action === 'syncrecordings') {
 // Handle retry of a single failed video upload.
 if ($action === 'retryupload' && $videoid) {
     require_sesskey();
-    require_once($CFG->dirroot . '/mod/zoomyt/classes/task/sync_recordings_to_youtube.php');
 
     $video = $DB->get_record('zoomyt_videos', ['id' => $videoid, 'zoomid' => $zoom->id, 'status' => 'failed'], '*', MUST_EXIST);
 
-    // Clear the error message; process_recording() will reset status to 'downloading'.
+    // Clear the error message; process_recording() will reset the status to
+    // 'downloading' when the background task runs.
     $DB->set_field('zoomyt_videos', 'error_message', null, ['id' => $video->id]);
 
-    try {
-        $task = new \mod_zoomyt\task\sync_recordings_to_youtube();
-        $task->execute_for_instance($zoom->id);
-        \core\notification::success(get_string('retry_upload_success', 'zoomyt'));
-    } catch (Exception $e) {
-        \core\notification::error(get_string('retry_upload_error', 'zoomyt', $e->getMessage()));
-    }
+    // Queue a background (ad-hoc) task rather than re-downloading and uploading
+    // inline. A long recording takes far longer to process than the web server /
+    // Azure Application Gateway request timeout, which previously left the page
+    // hanging while the upload continued (or was killed) behind the scenes.
+    $task = new \mod_zoomyt\task\sync_youtube_adhoc();
+    $task->set_custom_data(['instance_id' => $zoom->id, 'triggered_by' => 'manual']);
+    \core\task\manager::queue_adhoc_task($task, true);
 
+    \core\notification::success(get_string('retry_upload_queued', 'zoomyt'));
     redirect(new moodle_url('/mod/zoomyt/manage_recordings.php', ['id' => $id]));
 }
 
 // Handle sync to YouTube action.
 if ($action === 'syncyoutube') {
     require_sesskey();
-    require_once($CFG->dirroot . '/mod/zoomyt/classes/task/sync_recordings_to_youtube.php');
-    require_once($CFG->dirroot . '/mod/zoomyt/classes/youtube_service.php');
 
-    try {
-        $task = new \mod_zoomyt\task\sync_recordings_to_youtube();
-        // Run just for this specific zoom instance.
-        $task->execute_for_instance($zoom->id);
-        \core\notification::success(get_string('sync_youtube_success', 'zoomyt'));
-    } catch (Exception $e) {
-        \core\notification::error(get_string('sync_youtube_error', 'zoomyt', $e->getMessage()));
-    }
+    // Queue a background (ad-hoc) task instead of downloading from Zoom and
+    // uploading to YouTube inline. For long sessions this work takes many
+    // minutes — far longer than the web request / Azure Application Gateway
+    // timeout — so it must not run in the browser request. Cron picks the task
+    // up within a minute and runs it with no execution-time limit. The task also
+    // syncs metadata and transcripts for already-uploaded videos.
+    $task = new \mod_zoomyt\task\sync_youtube_adhoc();
+    $task->set_custom_data(['instance_id' => $zoom->id, 'triggered_by' => 'manual']);
+    \core\task\manager::queue_adhoc_task($task, true);
 
-    // Also sync metadata and transcripts from YouTube for uploaded videos.
-    try {
-        $ytservice = \mod_zoomyt\youtube_service::get_instance_for_activity($zoom->id);
-        if ($ytservice && $ytservice->is_configured()) {
-            // Get all uploaded videos for this activity.
-            $uploadedvideos = $DB->get_records('zoomyt_videos', [
-                'zoomid' => $zoom->id,
-                'status' => 'uploaded',
-            ]);
-
-            foreach ($uploadedvideos as $video) {
-                // Sync metadata from YouTube (title, description, thumbnail, visibility).
-                $ytservice->sync_video_from_youtube($video->id);
-
-                // Download transcripts if not already downloaded.
-                if (empty($video->transcript_downloaded)) {
-                    $ytservice->download_and_store_transcripts($video->id, $cm->id);
-                }
-            }
-        }
-    } catch (Exception $e) {
-        // Don't fail the whole sync if transcript download fails.
-        debugging('Transcript sync error: ' . $e->getMessage(), DEBUG_DEVELOPER);
-    }
-
+    \core\notification::success(get_string('sync_youtube_queued', 'zoomyt'));
     redirect(new moodle_url('/mod/zoomyt/manage_recordings.php', ['id' => $id]));
 }
 

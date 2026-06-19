@@ -884,10 +884,53 @@ class mod_zoomyt_mod_form extends moodleform_mod {
                                                              // we add the editing/creating user by default.
         $this->showschedulingprivilege = $showschedulingprivilege;
         $showalternativehosts = ($config->showalternativehosts != ZOOM_ALTERNATIVEHOSTS_DISABLE);
-        if ($showschedulingprivilege || $showalternativehosts) {
-            // Adding the "host" fieldset, where all settings relating to defining the meeting host are shown.
-            $mform->addElement('header', 'host', get_string('host', 'mod_zoomyt'));
+        {
+            // Consolidated "Hosts" fieldset: meeting host (owner), host transfer for
+            // existing activities, alternative hosts, and scheduling privilege.
+            $mform->addElement('header', 'host', get_string('hosts', 'zoomyt'));
             $mform->setExpanded('host');
+
+            // Meeting host (owner). The host owns the Zoom meeting; the activity's
+            // recordings/start identity belong to this account.
+            //
+            // When scheduling privilege is offered, the "Schedule for / Change host"
+            // control below already manages the host, so we don't duplicate it here.
+            if (!$showschedulingprivilege) {
+                if ($isnew) {
+                    $hostchoices = $this->get_meeting_host_choices($hostuserid);
+                    $mform->addElement('select', 'host_id', get_string('meetinghost', 'zoomyt'), $hostchoices);
+                    $mform->setType('host_id', PARAM_ALPHANUMEXT);
+                    $mform->setDefault('host_id', $hostuserid);
+                    $mform->addHelpButton('host_id', 'meetinghost', 'zoomyt');
+                } else {
+                    // Existing meeting: show the current host and offer a transfer.
+                    $mform->addElement('hidden', 'host_id', $hostuserid);
+                    $mform->setType('host_id', PARAM_ALPHANUMEXT);
+
+                    $hostlabel = $this->get_meeting_host_label($this->current->host_id);
+                    $mform->addElement('static', 'meeting_host_display',
+                        get_string('meetinghost', 'zoomyt'), $hostlabel);
+
+                    $currenthostemail = '';
+                    try {
+                        $currenthostemail = zoomyt_get_user($this->current->host_id)->email ?? '';
+                    } catch (\Exception $e) {
+                        $currenthostemail = '';
+                    }
+                    $transferchoices = $this->get_transfer_host_choices($currenthostemail);
+                    if (count($transferchoices) > 1) {
+                        $mform->addElement('select', 'transfer_host_to',
+                            get_string('transferhost', 'zoomyt'), $transferchoices);
+                        $mform->setType('transfer_host_to', PARAM_EMAIL);
+                        $mform->setDefault('transfer_host_to', '');
+                        $mform->addHelpButton('transfer_host_to', 'transferhost', 'zoomyt');
+                    }
+                }
+            } else {
+                // Add host id (will error if user does not have an account on Zoom).
+                $mform->addElement('hidden', 'host_id', $hostuserid);
+                $mform->setType('host_id', PARAM_ALPHANUMEXT);
+            }
 
             // Supplementary feature: Alternative hosts.
             // Only show if the admin did not disable this feature completely.
@@ -980,37 +1023,6 @@ class mod_zoomyt_mod_form extends moodleform_mod {
         // Add meeting id.
         $mform->addElement('hidden', 'meeting_id', -1);
         $mform->setType('meeting_id', PARAM_ALPHANUMEXT);
-
-        // Meeting host (owner). The host owns the Zoom meeting; the activity's
-        // recordings/start identity belong to this account. It is choosable at
-        // creation time and becomes read-only once the meeting exists.
-        //
-        // When scheduling privilege is offered, the "Schedule for / Change host"
-        // control above already manages the host, so we don't duplicate it here.
-        if (!$showschedulingprivilege) {
-            $mform->addElement('header', 'meetinghost_header', get_string('meetinghost', 'zoomyt'));
-            $mform->setExpanded('meetinghost_header', true);
-
-            if ($isnew) {
-                $hostchoices = $this->get_meeting_host_choices($hostuserid);
-                $mform->addElement('select', 'host_id', get_string('meetinghost', 'zoomyt'), $hostchoices);
-                $mform->setType('host_id', PARAM_ALPHANUMEXT);
-                $mform->setDefault('host_id', $hostuserid);
-                $mform->addHelpButton('host_id', 'meetinghost', 'zoomyt');
-            } else {
-                // Existing meeting: host is fixed. Preserve the value and show it read-only.
-                $mform->addElement('hidden', 'host_id', $hostuserid);
-                $mform->setType('host_id', PARAM_ALPHANUMEXT);
-
-                $hostlabel = $this->get_meeting_host_label($this->current->host_id);
-                $mform->addElement('static', 'meeting_host_display',
-                    get_string('meetinghost', 'zoomyt'), $hostlabel);
-            }
-        } else {
-            // Add host id (will error if user does not have an account on Zoom).
-            $mform->addElement('hidden', 'host_id', $hostuserid);
-            $mform->setType('host_id', PARAM_ALPHANUMEXT);
-        }
 
         // Add YouTube integration settings.
         $this->add_youtube_settings($mform, $config);
@@ -1120,6 +1132,39 @@ class mod_zoomyt_mod_form extends moodleform_mod {
             }
             if (!empty($zoomuser->id) && !isset($choices[$zoomuser->id])) {
                 $choices[$zoomuser->id] = fullname($teacher) . ' (' . $teacher->email . ')';
+            }
+        }
+
+        return $choices;
+    }
+
+    /**
+     * Build the list of course teachers the meeting host can be transferred to.
+     *
+     * Unlike get_meeting_host_choices(), teachers without a Zoom account are NOT
+     * excluded: their account is auto-created during the transfer where possible.
+     * Choices are keyed by email (the transfer is resolved by email at save time).
+     *
+     * @param string $currenthostemail Email of the current host (excluded from the list).
+     * @return array Map of email => display label, with '' => keep current host.
+     */
+    protected function get_transfer_host_choices($currenthostemail) {
+        $choices = ['' => get_string('transferhost_keep', 'zoomyt')];
+
+        try {
+            $teachers = get_enrolled_users($this->context, 'mod/zoomyt:eligiblealternativehost',
+                0, 'u.*', 'lastname, firstname');
+        } catch (\Exception $e) {
+            $teachers = [];
+        }
+
+        foreach ($teachers as $teacher) {
+            if ($currenthostemail !== '' && strcasecmp($teacher->email, $currenthostemail) === 0) {
+                continue;
+            }
+            $email = core_text::strtolower($teacher->email);
+            if (!isset($choices[$email])) {
+                $choices[$email] = fullname($teacher) . ' (' . $teacher->email . ')';
             }
         }
 
@@ -1433,6 +1478,15 @@ class mod_zoomyt_mod_form extends moodleform_mod {
             $allowed = array_keys($this->get_meeting_host_choices($creatorhostid));
             if (!in_array($data['host_id'], $allowed, true)) {
                 $errors['host_id'] = get_string('err_invalid_host', 'zoomyt');
+            }
+        }
+
+        // Guard the host-transfer select against tampering: the target must be
+        // an eligible course teacher.
+        if (!empty($data['transfer_host_to'])) {
+            $allowed = $this->get_transfer_host_choices('');
+            if (!isset($allowed[core_text::strtolower($data['transfer_host_to'])])) {
+                $errors['transfer_host_to'] = get_string('err_invalid_host', 'zoomyt');
             }
         }
 

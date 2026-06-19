@@ -198,6 +198,11 @@ function zoomyt_add_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = null)
         debugging("ZOOMYT: Auto-added instructors as alternative hosts: {$zoom->alternative_hosts}", DEBUG_DEVELOPER);
     }
 
+    // Gracefully handle manually-entered alternative hosts without a Zoom account:
+    // auto-create their account where possible and drop (with a notice) the ones
+    // that cannot be used yet, instead of letting the Zoom API reject the save.
+    zoomyt_notify_dropped_alternative_hosts(zoomyt_sanitize_alternative_hosts($zoom));
+
     $iscustom = !empty($zoom->recurring) && ($zoom->recurrence_type ?? null) == ZOOM_RECURRINGTYPE_CUSTOM
         && !empty($customoccurrences);
     $response = null;
@@ -366,6 +371,37 @@ function zoomyt_update_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = nu
     $updatedzoomrecord = $DB->get_record('zoomyt', ['id' => $zoom->id]);
     $zoom->meeting_id = $updatedzoomrecord->meeting_id;
     $zoom->webinar = $updatedzoomrecord->webinar;
+    if (empty($zoom->host_id)) {
+        $zoom->host_id = $updatedzoomrecord->host_id;
+    }
+
+    // Gracefully handle manually-entered alternative hosts without a Zoom account:
+    // auto-create their account where possible and drop (with a notice) the ones
+    // that cannot be used yet, instead of letting the Zoom API reject the save.
+    if (property_exists($zoom, 'alternative_hosts')) {
+        zoomyt_notify_dropped_alternative_hosts(zoomyt_sanitize_alternative_hosts($zoom));
+        $DB->set_field('zoomyt', 'alternative_hosts', $zoom->alternative_hosts, ['id' => $zoom->id]);
+    }
+
+    // Host transfer requested from the form: recreate the upcoming Zoom session(s)
+    // under the new host. Sessions that already took place are never touched.
+    if (!empty($zoom->transfer_host_to)) {
+        $transferresult = zoomyt_transfer_host($zoom, $zoom->transfer_host_to);
+        if (!empty($transferresult['message'])) {
+            if ($transferresult['success']) {
+                \core\notification::success($transferresult['message']);
+            } else {
+                \core\notification::warning($transferresult['message']);
+            }
+        }
+        if (!empty($transferresult['errors'])) {
+            \core\notification::error(implode(' | ', $transferresult['errors']));
+        }
+        // Keep downstream host references (alt-host exclusion, meeting PATCHes) in sync.
+        $updatedzoomrecord->host_id = $zoom->host_id;
+        $updatedzoomrecord->meeting_id = $zoom->meeting_id;
+        unset($zoom->transfer_host_to);
+    }
 
     // Auto-add course instructors as alternative hosts if enabled.
     $config = get_config('zoomyt');

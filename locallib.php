@@ -1502,6 +1502,49 @@ function zoomyt_get_next_occurrence($zoom) {
 }
 
 /**
+ * Whether a Zoom activity still has at least one session in the future or in progress.
+ *
+ * Used by automated jobs (e.g. alt-host sync) to avoid touching ended meetings.
+ * Custom-date schedules use zoomyt_custom_occurrences; standard recurring meetings
+ * use Moodle calendar events; single meetings use start_time + duration (seconds).
+ *
+ * @param stdClass $zoom Activity record (id required).
+ * @return bool True when there is an upcoming or in-progress session.
+ */
+function zoomyt_meeting_has_upcoming_sessions(stdClass $zoom): bool {
+    global $DB;
+
+    $now = time();
+
+    $iscustom = ((int) ($zoom->recurrence_type ?? 0) === ZOOM_RECURRINGTYPE_CUSTOM)
+        || $DB->record_exists('zoomyt_custom_occurrences', ['zoomid' => $zoom->id]);
+
+    if ($iscustom) {
+        foreach (zoomyt_get_custom_occurrences($zoom->id) as $occ) {
+            if (((int) $occ->start_time + (int) $occ->duration * 60) >= $now) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if (!empty($zoom->recurring)) {
+        if ((int) ($zoom->recurrence_type ?? 0) === ZOOM_RECURRINGTYPE_NOTIME) {
+            // Persistent room with no fixed schedule — still treated as active.
+            return true;
+        }
+
+        return $DB->record_exists_select(
+            'event',
+            'modulename = :modulename AND instance = :instance AND (timestart + timeduration) >= :now',
+            ['modulename' => 'zoomyt', 'instance' => $zoom->id, 'now' => $now]
+        );
+    }
+
+    return ((int) ($zoom->start_time ?? 0) + (int) ($zoom->duration ?? 0)) >= $now;
+}
+
+/**
  * Determine if a zoom meeting is in progress, is available, and/or is finished.
  *
  * @param stdClass $zoom
@@ -2201,6 +2244,7 @@ function zoomyt_load_meeting($id, $context, $usestarturl = true) {
     }
     $userishost = ($userisrealhost || in_array($userapiidentifier, $alternativehosts, true));
     $isteacher = has_capability('mod/zoomyt:eligiblealternativehost', $context);
+    $launchingasfallbackhost = false;
 
     zoomyt_provision_log('launch_check', 'ok',
         "isteacher={$isteacher}, userishost={$userishost}, userisrealhost={$userisrealhost}, apiident={$userapiidentifier}, althosts=" . ($zoom->alternative_hosts ?? '(empty)'),
@@ -2305,6 +2349,68 @@ function zoomyt_load_meeting($id, $context, $usestarturl = true) {
         return $returns;
     }
 
+    // If this teacher cannot be made an alternative host, move the upcoming
+    // meeting(s) to the shared fallback account and launch through its start URL.
+    // Do this only after confirming that the meeting is available, so an early
+    // click cannot change ownership. Past meeting IDs, reports, and recordings
+    // are preserved by zoomyt_transfer_host().
+    if ($available && $isteacher && !$userishost && $usestarturl) {
+        $fallbackemail = core_text::strtolower(trim((string) get_config('zoomyt', 'fallback_host_email')));
+        $fallbackhostid = zoomyt_get_fallback_host_id();
+
+        if (empty($fallbackemail) || empty($fallbackhostid)) {
+            zoomyt_provision_log('launch_fallback_transfer', 'error',
+                'Fallback host is not configured or could not be found',
+                $USER->email, $USER->id, $zoom->course, $zoom->meeting_id);
+            $returns['error'] = empty($fallbackemail)
+                ? get_string('fallback_host_not_configured', 'mod_zoomyt')
+                : get_string('fallback_host_not_found', 'mod_zoomyt', $fallbackemail);
+            return $returns;
+        }
+
+        if ($zoom->host_id !== $fallbackhostid) {
+            $lockfactory = \core\lock\lock_config::get_lock_factory('mod_zoomyt');
+            $lock = $lockfactory->get_lock('fallback_launch_' . $zoom->id, 10);
+            if (!$lock) {
+                zoomyt_provision_log('launch_fallback_transfer', 'error',
+                    'Could not acquire fallback launch lock',
+                    $USER->email, $USER->id, $zoom->course, $zoom->meeting_id);
+                $returns['error'] = get_string('transferhost_failed', 'mod_zoomyt', $fallbackemail);
+                return $returns;
+            }
+
+            try {
+                // Another teacher may have completed the transfer while this
+                // request waited for the lock, so refresh before changing Zoom.
+                $zoom = $DB->get_record('zoomyt', ['id' => $cm->instance], '*', MUST_EXIST);
+                $zoom = zoomyt_point_to_active_occurrence($zoom);
+
+                if ($zoom->host_id !== $fallbackhostid) {
+                    zoomyt_provision_log('launch_fallback_transfer', 'ok',
+                        "Transferring meeting from {$zoom->host_id} to {$fallbackemail}",
+                        $USER->email, $USER->id, $zoom->course, $zoom->meeting_id);
+                    $transfer = zoomyt_transfer_host($zoom, $fallbackemail);
+                    if (empty($transfer['success'])) {
+                        zoomyt_provision_log('launch_fallback_transfer', 'error',
+                            $transfer['message'] ?: 'Fallback host transfer failed',
+                            $USER->email, $USER->id, $zoom->course, $zoom->meeting_id);
+                        $returns['error'] = $transfer['message']
+                            ?: get_string('transferhost_failed', 'mod_zoomyt', $fallbackemail);
+                        return $returns;
+                    }
+                }
+            } finally {
+                $lock->release();
+            }
+        }
+
+        $launchingasfallbackhost = true;
+        $userishost = true;
+        zoomyt_provision_log('launch_fallback_transfer', 'ok',
+            "Launching as shared fallback host {$fallbackemail}",
+            $USER->email, $USER->id, $zoom->course, $zoom->meeting_id);
+    }
+
     // Determine the in-meeting display name for the current Moodle user.
     // The name is appended to both join_url AND start_url so the teacher shows
     // their own name in the Zoom room, regardless of which Zoom account owns
@@ -2339,13 +2445,12 @@ function zoomyt_load_meeting($id, $context, $usestarturl = true) {
     //   - the meeting is owned by the shared fallback host account, which we rename
     //     on the fly so the launching teacher's name is shown.
     //
-    // Any other teacher (an alternative host on a meeting owned by a different real
-    // person - e.g. the colleague who created the activity) must use the join_url
-    // so they join as THEMSELVES, with host controls granted via the alternative
-    // host list, instead of impersonating the owner.
+    // Teachers who could not be provisioned as alternative hosts have already had
+    // the meeting transferred to the shared fallback account above.
     $fallbackhostid = zoomyt_get_fallback_host_id();
     $hostisfallback = (!empty($fallbackhostid) && $zoom->host_id === $fallbackhostid);
-    $usehoststarturl = $usestarturl && ($userisrealhost || ($hostisfallback && $isteacher));
+    $usehoststarturl = $usestarturl &&
+        ($userisrealhost || $launchingasfallbackhost || ($hostisfallback && $isteacher));
 
     if ($usehoststarturl) {
         // Keep the legacy host rename for Zoom-side reporting. This only affects the
@@ -2353,7 +2458,16 @@ function zoomyt_load_meeting($id, $context, $usestarturl = true) {
         // best-effort; the uname URL parameter is what guarantees the correct
         // in-meeting name even if the API rename fails or hasn't propagated yet.
         zoomyt_rename_host_for_teacher($zoom->host_id, $USER);
-        $starturl = zoomyt_get_start_url($zoom->meeting_id, $zoom->webinar, $zoom->join_url);
+        // Never silently downgrade a fallback-host launch to the participant URL.
+        $starturlfallback = ($hostisfallback && $isteacher) ? null : $zoom->join_url;
+        $starturl = zoomyt_get_start_url($zoom->meeting_id, $zoom->webinar, $starturlfallback);
+        if (empty($starturl)) {
+            zoomyt_provision_log('launch_fallback_start_url', 'error',
+                'Zoom did not return a host start URL after fallback transfer',
+                $USER->email, $USER->id, $zoom->course, $zoom->meeting_id);
+            $returns['error'] = get_string('zoomerr', 'mod_zoomyt');
+            return $returns;
+        }
         $returns['nexturl'] = new moodle_url($starturl, ['uname' => $unamedisplay, 'uemail' => $USER->email]);
     } else {
         $url = $zoom->join_url;
@@ -2415,13 +2529,13 @@ function zoomyt_load_meeting($id, $context, $usestarturl = true) {
  *
  * @param string $meetingid Zoom meeting ID.
  * @param bool $iswebinar If the session is a webinar.
- * @param string $fallbackurl URL to use if the webservice call fails.
- * @return string Best available URL for starting the meeting.
+ * @param string|null $fallbackurl URL to use if the webservice call fails, or null to require a start URL.
+ * @return string|null Best available URL for starting the meeting.
  */
 function zoomyt_get_start_url($meetingid, $iswebinar, $fallbackurl) {
     try {
         $response = zoomyt_webservice()->get_meeting_webinar_info($meetingid, $iswebinar);
-        return $response->start_url ?? $response->join_url;
+        return $response->start_url ?? $fallbackurl;
     } catch (moodle_exception $e) {
         // If an exception was thrown, gracefully use the fallback URL.
         return $fallbackurl;

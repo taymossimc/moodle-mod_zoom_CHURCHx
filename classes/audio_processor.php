@@ -56,10 +56,16 @@ class audio_processor {
 
         $this->ducking = [
             // sidechaincompress threshold: linear amplitude 0-1. Lower = ducks more easily.
-            'threshold' => (float) (get_config('zoomyt', 'duck_threshold') ?: 0.03),
-            'ratio'     => (float) (get_config('zoomyt', 'duck_ratio') ?: 8),
+            'threshold' => (float) (get_config('zoomyt', 'duck_threshold') ?: 0.02),
+            // Compression ratio applied to the floor while the interpreter speaks. Higher
+            // = the original audio is pushed down much harder (more pronounced ducking).
+            'ratio'     => (float) (get_config('zoomyt', 'duck_ratio') ?: 20),
             'attack'    => (float) (get_config('zoomyt', 'duck_attack') ?: 5),
-            'release'   => (float) (get_config('zoomyt', 'duck_release') ?: 300),
+            'release'   => (float) (get_config('zoomyt', 'duck_release') ?: 350),
+            // Sidechain (interpreter) detection gain. Boosting this makes even moderate
+            // interpreter speech trigger a deep duck, so the original is barely audible
+            // underneath the translation. 1 = no boost.
+            'level_sc'  => (float) (get_config('zoomyt', 'duck_level_sc') ?: 4),
         ];
     }
 
@@ -172,6 +178,7 @@ class audio_processor {
         $ratio = sprintf('%.2f', $this->ducking['ratio']);
         $attack = sprintf('%.1f', $this->ducking['attack']);
         $release = sprintf('%.1f', $this->ducking['release']);
+        $levelsc = sprintf('%.2f', max(1.0, $this->ducking['level_sc']));
 
         $filter =
             '[0:a]aresample=48000,aformat=channel_layouts=stereo[floor];'
@@ -180,7 +187,8 @@ class audio_processor {
                 . 'threshold=' . $threshold
                 . ':ratio=' . $ratio
                 . ':attack=' . $attack
-                . ':release=' . $release . '[ducked];'
+                . ':release=' . $release
+                . ':level_sc=' . $levelsc . '[ducked];'
             // amix normalize=0 keeps full levels (interpreter on top of ducked floor).
             . '[ducked][interpb]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mixed];'
             . '[mixed]loudnorm=I=-16:TP=-1.5:LRA=11[out]';

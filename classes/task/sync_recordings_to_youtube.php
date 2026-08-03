@@ -80,7 +80,7 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
         // a long time for multi-hour sessions. Lift the time and memory limits so
         // the job is not cut short. These are no-ops under CLI/cron (the normal
         // execution path) but protect any web-context fallback.
-        \core\php_time_limit::raise(60 * 60 * 12);
+        \core_php_time_limit::raise(60 * 60 * 12);
         raise_memory_limit(MEMORY_EXTRA);
 
         mtrace('Starting Zoom to YouTube sync task...');
@@ -276,11 +276,16 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
         }
 
         // Exclude recordings that already have a successfully uploaded video.
+        // Use a LEFT JOIN to meeting_details so the upload does not depend on the
+        // Zoom Report API, which lags meeting end by 1-3 hours and populates that
+        // table. When the details row is not there yet, fall back to the
+        // recording's own start time so the video can still upload immediately.
         $sql = "SELECT zmr.*, z.id as zoomid, z.course, z.name as session_name,
-                       z.yt_primary_language, zmd.start_time as session_time
+                       z.yt_primary_language,
+                       COALESCE(zmd.start_time, zmr.recordingstart) as session_time
                 FROM {zoomyt_meeting_recordings} zmr
                 JOIN {zoomyt} z ON z.id = zmr.zoomid
-                JOIN {zoomyt_meeting_details} zmd ON zmd.uuid = zmr.meetinguuid
+                LEFT JOIN {zoomyt_meeting_details} zmd ON zmd.uuid = zmr.meetinguuid
                 WHERE NOT EXISTS (
                     SELECT 1 FROM {zoomyt_videos} zyv
                     WHERE zyv.recordingid = zmr.id AND zyv.status IN ('uploaded', 'deleted')
@@ -437,13 +442,15 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
         mtrace('  Uploading to YouTube...');
         try {
             $primarylanguage = $this->resolve_primary_language($recording);
+            $audiolanguage = $this->resolve_original_audio_language($primarylanguage);
             $result = $ytservice->upload_video(
                 $localpath,
                 $video->title,
                 $video->description,
                 $video->visibility,
                 null,
-                $primarylanguage
+                $primarylanguage,
+                $audiolanguage
             );
 
             $video->youtube_video_id = $result->id;
@@ -622,6 +629,32 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
         return zoomyt_moodle_lang_to_bcp47($lang);
     }
 
+    /**
+     * Resolve the BCP-47 language label to apply to the original (floor) audio track
+     * on upload. This is separate from the metadata language: for a multilingual floor
+     * the original track should carry a neutral code (e.g. 'mul') so that per-language
+     * tracks (English, Portuguese, ...) can be added alongside the original without a
+     * language collision.
+     *
+     * Configured site-wide via the 'youtube_original_audio_language' setting. A value of
+     * '' or 'primary' means "label the original audio with the primary language".
+     *
+     * @param string|null $primarylanguage The resolved primary (metadata) language.
+     * @return string|null BCP-47 code, or null when nothing should be set.
+     */
+    protected function resolve_original_audio_language(?string $primarylanguage): ?string {
+        $configured = trim((string) get_config('zoomyt', 'youtube_original_audio_language'));
+        // YouTube rejects the neutral ISO codes (mul/und/zxx/mis/zza) for
+        // defaultAudioLanguage with an invalidVideoMetadata error, which would fail the
+        // whole upload. Guard against them (and the empty/"primary" sentinel) by falling
+        // back to the primary language so uploads always succeed.
+        $rejected = ['', 'primary', 'mul', 'und', 'zxx', 'mis', 'zza'];
+        if (in_array(strtolower($configured), $rejected, true)) {
+            return $primarylanguage;
+        }
+        return $configured;
+    }
+
     /** @var int Maximum audio tracks to synthesize/attach per run. */
     const MAX_AUDIOTRACKS_PER_RUN = 5;
 
@@ -782,12 +815,18 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
                     continue;
                 }
 
-                // The default (floor) track already carries the primary language;
-                // an interpretation channel in that language would collide with it.
+                // Previously we skipped an interpretation channel whose language matched
+                // the primary language, assuming the default (floor) track already
+                // covered it. That assumption fails when the floor is multilingual: e.g.
+                // a session with both English and Portuguese speakers on the floor still
+                // needs a fully-English track (English interpretation ducked over the
+                // Portuguese stretches). Zoom only produces an interpretation recording
+                // for a language when an interpreter actually spoke it, so building a
+                // track for every interpretation recording - including the primary
+                // language - is both safe and what bilingual sessions require.
                 if ($lang === $primarylang) {
                     mtrace('  Interpretation recording ' . $interp->id . ' is the primary language (' .
-                        $lang . '); covered by the default track, skipping.');
-                    continue;
+                        $lang . '); building a dedicated ' . $lang . ' track (floor may be multilingual).');
                 }
 
                 // Skip if this track is already attached, or already synthesized and

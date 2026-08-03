@@ -1200,15 +1200,20 @@ class webservice {
      * @param int|string $meetingid The Zoom meeting or webinar ID.
      * @param bool $webinar Whether this is a webinar.
      * @param string $alternativehosts Comma-separated email addresses.
+     * @param bool $sendnotifications When false, suppresses Zoom emails to alternative hosts.
      * @return void
      */
-    public function update_meeting_hosts($meetingid, $webinar, $alternativehosts) {
+    public function update_meeting_hosts($meetingid, $webinar, $alternativehosts, $sendnotifications = true) {
         $url = ($webinar ? 'webinars/' : 'meetings/') . $meetingid;
         $data = [
             'settings' => [
                 'alternative_hosts' => $alternativehosts,
             ],
         ];
+        if (!$sendnotifications) {
+            $data['settings']['alternative_hosts_email_notification'] = false;
+            $data['settings']['email_notification'] = false;
+        }
         $this->make_call($url, $data, 'patch');
     }
 

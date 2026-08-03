@@ -819,6 +819,19 @@ if ($ADMIN->fulltree) {
         $visibilityoptions
     ));
 
+    // Language label applied to the ORIGINAL (floor) audio track on upload
+    // (defaultAudioLanguage). YouTube only accepts real BCP-47 language codes here -
+    // the neutral codes 'mul'/'und'/'zxx' are rejected with invalidVideoMetadata - so
+    // this must be a concrete language (e.g. 'en', 'en-US', 'pt-BR'). Leave blank to
+    // use the primary language. The title/description metadata language is unaffected.
+    $settings->add(new admin_setting_configtext(
+        'zoomyt/youtube_original_audio_language',
+        get_string('youtube_original_audio_language', 'zoomyt'),
+        get_string('youtube_original_audio_language_desc', 'zoomyt'),
+        '',
+        PARAM_RAW_TRIMMED
+    ));
+
     // Alert the administrator by email when a YouTube OAuth token refresh fails.
     $settings->add(new admin_setting_configcheckbox(
         'zoomyt/oauth_alert_enabled',
@@ -959,7 +972,7 @@ if ($ADMIN->fulltree) {
         'zoomyt/duck_threshold',
         get_string('duck_threshold', 'zoomyt'),
         get_string('duck_threshold_desc', 'zoomyt'),
-        '0.03',
+        '0.02',
         PARAM_RAW_TRIMMED
     ));
 
@@ -967,7 +980,7 @@ if ($ADMIN->fulltree) {
         'zoomyt/duck_ratio',
         get_string('duck_ratio', 'zoomyt'),
         get_string('duck_ratio_desc', 'zoomyt'),
-        '8',
+        '20',
         PARAM_RAW_TRIMMED
     ));
 
@@ -983,7 +996,15 @@ if ($ADMIN->fulltree) {
         'zoomyt/duck_release',
         get_string('duck_release', 'zoomyt'),
         get_string('duck_release_desc', 'zoomyt'),
-        '300',
+        '350',
+        PARAM_RAW_TRIMMED
+    ));
+
+    $settings->add(new admin_setting_configtext(
+        'zoomyt/duck_level_sc',
+        get_string('duck_level_sc', 'zoomyt'),
+        get_string('duck_level_sc_desc', 'zoomyt'),
+        '4',
         PARAM_RAW_TRIMMED
     ));
 }

@@ -240,14 +240,33 @@ class webhook_handler {
             ])->trigger();
         }
 
-        // Queue the report fetch task to run immediately.
-        // We use a dedicated ad-hoc task (the periodic task is a scheduled_task and
-        // cannot be queued ad-hoc) to avoid blocking the webhook response.
-        $task = new \mod_zoomyt\task\fetch_reports_adhoc();
-        $task->set_custom_data(['instance_id' => $zoom->id, 'triggered_by' => 'webhook']);
-        \core\task\manager::queue_adhoc_task($task, true); // true = run if duplicate exists
+        // Queue the report fetch task. We use a dedicated ad-hoc task (the periodic
+        // task is a scheduled_task and cannot be queued ad-hoc) to avoid blocking the
+        // webhook response.
+        //
+        // Zoom's Report API lags the end of a meeting by anywhere from a few minutes
+        // to a few hours, so a single immediate fetch frequently returns nothing (the
+        // meeting is not listed yet) and meeting_details - which holds attendance and
+        // accurate session start times - never gets populated until the every-2-hours
+        // scheduled task happens to catch it. Queue the immediate attempt plus a couple
+        // of delayed retries so the data lands as soon as Zoom makes it available.
+        //
+        // Each retry carries distinct custom data so the queue's duplicate check
+        // (checkforexisting) treats them as separate tasks instead of collapsing them
+        // into one, while still preventing pile-ups if Zoom re-delivers the webhook.
+        $reportdelays = [0, 60, 120]; // Minutes after the meeting ended.
+        foreach ($reportdelays as $delayminutes) {
+            $task = new \mod_zoomyt\task\fetch_reports_adhoc();
+            $data = ['instance_id' => $zoom->id, 'triggered_by' => 'webhook'];
+            if ($delayminutes > 0) {
+                $data['retry_minutes'] = $delayminutes;
+                $task->set_next_run_time(time() + ($delayminutes * MINSECS));
+            }
+            $task->set_custom_data($data);
+            \core\task\manager::queue_adhoc_task($task, true); // true = skip if an identical task is already queued.
+        }
 
-        $this->log("Queued report fetch for activity {$zoom->id}");
+        $this->log("Queued report fetch (immediate + delayed retries) for activity {$zoom->id}");
 
         return ['status' => 200, 'body' => ['message' => 'Report fetch queued']];
     }

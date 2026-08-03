@@ -90,6 +90,12 @@ class sync_alternative_hosts extends scheduled_task {
                     continue;
                 }
 
+                if (!zoomyt_meeting_has_upcoming_sessions($zoom)) {
+                    mtrace("  => No upcoming sessions, skipping.");
+                    $skippedcount++;
+                    continue;
+                }
+
                 // Get instructor emails for this course.
                 $instructoremails = zoomyt_get_course_instructor_emails($zoom->course);
 
@@ -124,8 +130,8 @@ class sync_alternative_hosts extends scheduled_task {
 
                 mtrace("  => Updating alternative hosts: {$newhosts}");
 
-                // Update only alternative hosts on Zoom (targeted PATCH).
-                $service->update_meeting_hosts($zoom->meeting_id, $zoom->webinar ?? false, $newhosts);
+                // Update only alternative hosts on Zoom (targeted PATCH, no email notifications).
+                $service->update_meeting_hosts($zoom->meeting_id, $zoom->webinar ?? false, $newhosts, false);
 
                 // Update in database.
                 $DB->set_field('zoomyt', 'alternative_hosts', $newhosts, ['id' => $zoom->id]);

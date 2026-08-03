@@ -447,8 +447,11 @@ class youtube_service {
      * @param string $description Video description.
      * @param string $visibility Visibility: public, unlisted, private.
      * @param callable|null $progresscallback Optional callback for progress updates.
-     * @param string|null $primarylanguage Optional BCP-47 language designation for the
-     *                                      video's default language and default audio track.
+     * @param string|null $primarylanguage Optional BCP-47 language for the video's
+     *                                      metadata (title/description) language.
+     * @param string|null $audiolanguage Optional BCP-47 language label for the original
+     *                                    (floor) audio track. Defaults to $primarylanguage.
+     *                                    Use a neutral code (e.g. 'mul') for a multilingual floor.
      * @return object Video info with id, url, etc.
      * @throws \moodle_exception On error.
      */
@@ -458,7 +461,8 @@ class youtube_service {
         string $description = '',
         string $visibility = 'unlisted',
         ?callable $progresscallback = null,
-        ?string $primarylanguage = null
+        ?string $primarylanguage = null,
+        ?string $audiolanguage = null
     ): object {
         if (!file_exists($filepath)) {
             throw new \moodle_exception('youtube_file_not_found', 'zoomyt', '', $filepath);
@@ -474,9 +478,16 @@ class youtube_service {
             'categoryId' => '27', // Education category.
         ];
         if (!empty($primarylanguage)) {
-            // Designate the language for the video and its default (floor) audio track.
+            // Language of the title/description metadata.
             $snippet['defaultLanguage'] = $primarylanguage;
-            $snippet['defaultAudioLanguage'] = $primarylanguage;
+        }
+        // Language label for the original (floor) audio track. For a multilingual
+        // floor this should be a neutral code (e.g. 'mul' = multiple languages) so
+        // English and Portuguese can be added later as distinct alternate tracks
+        // alongside the original. Falls back to the metadata language.
+        $audiolang = !empty($audiolanguage) ? $audiolanguage : $primarylanguage;
+        if (!empty($audiolang)) {
+            $snippet['defaultAudioLanguage'] = $audiolang;
         }
         $metadata = [
             'snippet' => $snippet,
@@ -984,6 +995,58 @@ class youtube_service {
 
         $result = json_decode($response);
 
+        if (isset($result->error)) {
+            throw new \moodle_exception('youtube_api_error', 'zoomyt', '', $result->error->message ?? 'Unknown error');
+        }
+
+        return true;
+    }
+
+    /**
+     * Set the language labels on an existing video without disturbing its title,
+     * description or category.
+     *
+     * videos.update replaces the whole snippet part, so we re-send the existing
+     * title/description/category alongside the new language fields.
+     *
+     * @param string $videoid YouTube video ID.
+     * @param string $defaultaudiolanguage BCP-47 language for the original audio track
+     *                                     (e.g. 'mul' for a multilingual floor).
+     * @param string|null $defaultlanguage Optional BCP-47 metadata language to preserve/set.
+     * @return bool True on success.
+     * @throws \moodle_exception On error.
+     */
+    public function set_audio_language(string $videoid, string $defaultaudiolanguage,
+            ?string $defaultlanguage = null): bool {
+        $token = $this->get_access_token();
+
+        // Preserve the current title/description/category (snippet is replaced wholesale).
+        $current = $this->get_video_info($videoid);
+
+        $snippet = [
+            'title' => $current->title,
+            'description' => $current->description,
+            'categoryId' => $current->categoryId ?? '27',
+        ];
+        if (!empty($defaultlanguage)) {
+            $snippet['defaultLanguage'] = $defaultlanguage;
+        }
+        $snippet['defaultAudioLanguage'] = $defaultaudiolanguage;
+
+        $data = ['id' => $videoid, 'snippet' => $snippet];
+
+        $curl = new \curl();
+        $curl->setHeader('Authorization: Bearer ' . $token);
+        $curl->setHeader('Content-Type: application/json');
+
+        $url = self::API_URL . '/videos?part=snippet';
+        $response = $curl->put($url, json_encode($data));
+
+        if ($curl->get_errno()) {
+            throw new \moodle_exception('youtube_api_error', 'zoomyt', '', $curl->error);
+        }
+
+        $result = json_decode($response);
         if (isset($result->error)) {
             throw new \moodle_exception('youtube_api_error', 'zoomyt', '', $result->error->message ?? 'Unknown error');
         }

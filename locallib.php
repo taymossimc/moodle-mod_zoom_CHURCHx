@@ -2242,12 +2242,22 @@ function zoomyt_load_meeting($id, $context, $usestarturl = true) {
     if (filter_var($userapiidentifier, FILTER_VALIDATE_EMAIL) !== false) {
         $userapiidentifier = strtolower($userapiidentifier);
     }
-    $userishost = ($userisrealhost || in_array($userapiidentifier, $alternativehosts, true));
+    $listedasalthost = in_array($userapiidentifier, $alternativehosts, true);
+    $effectivealthost = zoomyt_user_is_effective_alt_host($userapiidentifier, $alternativehosts);
+    $userishost = ($userisrealhost || $effectivealthost);
     $isteacher = has_capability('mod/zoomyt:eligiblealternativehost', $context);
     $launchingasfallbackhost = false;
 
+    if ($listedasalthost && !$effectivealthost && !$userisrealhost) {
+        zoomyt_provision_log('launch_pending_alt_host', 'skip',
+            'Listed as alternative host in Moodle but not active on Zoom — eligible for fallback-host launch',
+            $USER->email, $USER->id, $zoom->course, $zoom->meeting_id);
+    }
+
     zoomyt_provision_log('launch_check', 'ok',
-        "isteacher={$isteacher}, userishost={$userishost}, userisrealhost={$userisrealhost}, apiident={$userapiidentifier}, althosts=" . ($zoom->alternative_hosts ?? '(empty)'),
+        "isteacher={$isteacher}, userishost={$userishost}, userisrealhost={$userisrealhost}, "
+        . "listedasalthost={$listedasalthost}, effectivealthost={$effectivealthost}, "
+        . "apiident={$userapiidentifier}, althosts=" . ($zoom->alternative_hosts ?? '(empty)'),
         $USER->email, $USER->id, $zoom->course, $zoom->meeting_id);
 
     // Provision teacher at launch time: ensure they have a Pro license and are an
@@ -2300,7 +2310,9 @@ function zoomyt_load_meeting($id, $context, $usestarturl = true) {
                         $zoom->alternative_hosts = $newhosts;
 
                         $alternativehosts = zoomyt_get_alternative_host_array_from_string($newhosts);
-                        $userishost = ($userisrealhost || in_array($userapiidentifier, $alternativehosts, true));
+                        $listedasalthost = in_array($userapiidentifier, $alternativehosts, true);
+                        $effectivealthost = zoomyt_user_is_effective_alt_host($userapiidentifier, $alternativehosts);
+                        $userishost = ($userisrealhost || $effectivealthost);
 
                         zoomyt_provision_log('update_alt_hosts', 'ok',
                             "Updated on Zoom. userishost now={$userishost}",
@@ -2720,6 +2732,49 @@ function zoomyt_get_user($identifier) {
     }
 
     return $users[$identifier];
+}
+
+/**
+ * Whether an email belongs to an active user on this Zoom account.
+ *
+ * Pending invitations (handshake not completed) and users registered on another
+ * Zoom organization are not active and cannot host or act as alternative hosts.
+ *
+ * @param string $email Email address (case-insensitive).
+ * @return bool True when the user exists on the account with status active.
+ */
+function zoomyt_is_active_zoom_user(string $email): bool {
+    $email = core_text::strtolower(trim($email));
+    if ($email === '') {
+        return false;
+    }
+
+    try {
+        $zoomuser = zoomyt_get_user($email);
+        if ($zoomuser === false || empty($zoomuser)) {
+            return false;
+        }
+        return ($zoomuser->status ?? '') === 'active';
+    } catch (\Exception $e) {
+        return false;
+    }
+}
+
+/**
+ * Whether the current user can act as an alternative host on Zoom right now.
+ *
+ * The Moodle alternative_hosts field may list emails that are pending or absent
+ * from the account; those must not block the fallback-host launch path.
+ *
+ * @param string $userapiidentifier Lowercased Moodle/Zoom API identifier (usually email).
+ * @param array $alternativehosts Parsed alternative host emails from the activity.
+ * @return bool True when listed and active on Zoom.
+ */
+function zoomyt_user_is_effective_alt_host(string $userapiidentifier, array $alternativehosts): bool {
+    if (!in_array($userapiidentifier, $alternativehosts, true)) {
+        return false;
+    }
+    return zoomyt_is_active_zoom_user($userapiidentifier);
 }
 
 /**

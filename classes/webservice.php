@@ -482,6 +482,44 @@ class webservice {
      * @return bool Whether the user was succesfully created.
      * @see https://github.com/yedidiaklein/moodle-local_zoomsyncusers An external plugin that depends on mod_zoomyt uses this method.
      */
+    /**
+     * Generate a throwaway password that satisfies Zoom's user-creation rules.
+     *
+     * Zoom rejects passwords that don't contain at least one number (and, depending
+     * on account policy, mixed case / a symbol), e.g. "Zoom received a bad request:
+     * Have at least 1 number (1, 2, 3...)". A raw base64 string does not reliably
+     * include a digit, so autoCreate was failing intermittently. This builds a
+     * 16-character password that is guaranteed to contain an uppercase letter,
+     * a lowercase letter, a digit, and a symbol. The value is never used by the
+     * account owner (they activate via invitation / SSO / password reset), so it
+     * only needs to pass validation.
+     *
+     * @return string A Zoom-compliant password.
+     */
+    private static function generate_compliant_password() {
+        // Ambiguous characters (0/O, 1/l/I) are omitted to keep it clean.
+        $upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+        $lower = 'abcdefghijkmnpqrstuvwxyz';
+        $digit = '23456789';
+        $symbol = '!@#$%^&*';
+        $all = $upper . $lower . $digit . $symbol;
+
+        $pick = function ($set) {
+            return $set[random_int(0, strlen($set) - 1)];
+        };
+
+        // Guarantee one of each required category, then fill the rest.
+        $chars = [$pick($upper), $pick($lower), $pick($digit), $pick($symbol)];
+        for ($i = count($chars); $i < 16; $i++) {
+            $chars[] = $pick($all);
+        }
+
+        // Shuffle so the guaranteed characters aren't always in the same positions.
+        shuffle($chars);
+
+        return implode('', $chars);
+    }
+
     public function autocreate_user($user, $action = 'autoCreate', $type = ZOOM_USER_TYPE_PRO) {
         // Classic: user:write:admin.
         // Granular: user:write:user:admin.
@@ -492,7 +530,7 @@ class webservice {
             'type' => $type,
             'first_name' => $user->firstname,
             'last_name' => $user->lastname,
-            'password' => base64_encode(random_bytes(16)),
+            'password' => self::generate_compliant_password(),
         ];
 
         try {
@@ -570,6 +608,13 @@ class webservice {
 
         $usertimes = [];
 
+        // The shared fallback/service host must never be recycled: launch-link
+        // sessions are transferred to and started under this account, so if it
+        // were demoted to Basic every such meeting would be capped at 40 minutes.
+        // It typically has no personal login/usage signal, which would otherwise
+        // make it look "least recently active" and get picked first.
+        $fallbackemail = strtolower(trim((string) get_config('zoomyt', 'fallback_host_email')));
+
         // Classic: user:read:admin.
         // Granular: user:read:list_users:admin.
         $userslist = $this->list_users();
@@ -597,6 +642,12 @@ class webservice {
         foreach ($userslist as $user) {
             // Skip Basic user accounts.
             if ($user->type == ZOOM_USER_TYPE_BASIC) {
+                continue;
+            }
+
+            // Never recycle the shared fallback/service host — it must always
+            // stay Pro so launch-link sessions are not capped at 40 minutes.
+            if ($fallbackemail !== '' && strcasecmp($user->email ?? '', $fallbackemail) === 0) {
                 continue;
             }
 

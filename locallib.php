@@ -211,6 +211,55 @@ function zoomyt_create_occurrence_with_retry($zoom, int $starttime, int $duratio
 }
 
 /**
+ * Update a per-session meeting, retrying without an alternative host rejected by Zoom.
+ *
+ * @param stdClass $zoom Activity record (mutated if an invalid host is removed).
+ * @param int|string $meetingid Zoom meeting ID.
+ * @param int $starttime Session start timestamp.
+ * @param int $durationseconds Session duration in seconds.
+ * @return void
+ * @throws moodle_exception For errors unrelated to an alternative host.
+ */
+function zoomyt_update_occurrence_with_alt_host_retry(
+    stdClass $zoom,
+    $meetingid,
+    int $starttime,
+    int $durationseconds
+): void {
+    global $DB;
+
+    $service = zoomyt_webservice();
+    $cmid = $zoom->coursemodule ?? null;
+    $maxretries = 5;
+
+    for ($attempt = 0; $attempt <= $maxretries; $attempt++) {
+        try {
+            $service->update_scheduled_occurrence($zoom, $meetingid, $starttime, $durationseconds, $cmid);
+            return;
+        } catch (moodle_exception $e) {
+            $bademail = zoomyt_extract_bad_alt_host_email($e->getMessage());
+            if ($bademail === null || empty($zoom->alternative_hosts)) {
+                throw $e;
+            }
+
+            zoomyt_provision_log(
+                'alt_host_retry',
+                'skip',
+                "Removing invalid alt host {$bademail}: " . $e->getMessage(),
+                $bademail,
+                null,
+                $zoom->course ?? null,
+                $meetingid
+            );
+            $zoom->alternative_hosts = zoomyt_remove_alt_host($zoom->alternative_hosts, $bademail);
+            $DB->set_field('zoomyt', 'alternative_hosts', $zoom->alternative_hosts, ['id' => $zoom->id]);
+        }
+    }
+
+    $service->update_scheduled_occurrence($zoom, $meetingid, $starttime, $durationseconds, $cmid);
+}
+
+/**
  * Reconcile the per-session Zoom meetings for a custom-dates activity.
  *
  * For each desired session: creates a scheduled Zoom meeting (new), updates the
@@ -249,6 +298,7 @@ function zoomyt_sync_custom_occurrence_meetings(stdClass $zoom, array $desired):
         if ($row && !empty($row->meeting_id) && !empty($row->exists_on_zoom)) {
             $keep[$row->id] = true;
             $datechanged = ((int) $row->start_time !== $start || (int) $row->duration !== $durmin);
+            $updatesucceeded = false;
 
             // Re-push the full meeting settings for any session that has not yet
             // ended, so changes made when editing the activity (e.g. enabling
@@ -259,8 +309,13 @@ function zoomyt_sync_custom_occurrence_meetings(stdClass $zoom, array $desired):
 
             if ($datechanged || !$sessionended) {
                 try {
-                    $service->update_scheduled_occurrence($zoom, $row->meeting_id, $start, $dursec,
-                        $zoom->coursemodule ?? null);
+                    zoomyt_update_occurrence_with_alt_host_retry(
+                        $zoom,
+                        $row->meeting_id,
+                        $start,
+                        $dursec
+                    );
+                    $updatesucceeded = true;
                     if ($datechanged) {
                         $updated++;
                     }
@@ -275,7 +330,9 @@ function zoomyt_sync_custom_occurrence_meetings(stdClass $zoom, array $desired):
                 }
             }
 
-            if ($datechanged) {
+            // Do not claim a new local date/duration when Zoom rejected it.
+            // The previous values remain the last known synchronized state.
+            if ($datechanged && $updatesucceeded) {
                 $row->start_time = $start;
                 $row->duration = $durmin;
                 $row->timemodified = $now;
@@ -334,6 +391,7 @@ function zoomyt_sync_custom_occurrence_meetings(stdClass $zoom, array $desired):
         if (!empty($keep[$row->id])) {
             continue;
         }
+        $removerow = true;
         if (!empty($row->meeting_id) && !empty($row->exists_on_zoom)) {
             try {
                 $service->delete_meeting($row->meeting_id, $zoom->webinar);
@@ -342,10 +400,17 @@ function zoomyt_sync_custom_occurrence_meetings(stdClass $zoom, array $desired):
                 // A meeting that is already gone on Zoom is fine; anything else is reported.
                 if (!(isset($e->zoomerrorcode) && zoomyt_is_meeting_gone_error($e))) {
                     $errors[] = userdate($row->start_time) . ': ' . $e->getMessage();
+                    $removerow = false;
                 }
             }
         }
-        $DB->delete_records('zoomyt_custom_occurrences', ['id' => $row->id]);
+        if ($removerow) {
+            $DB->delete_records('zoomyt_custom_occurrences', ['id' => $row->id]);
+        } else {
+            // Retain failed deletions so the next save can retry and the local
+            // schedule does not falsely imply that the Zoom meeting is gone.
+            $keep[$row->id] = true;
+        }
     }
 
     return ['errors' => $errors, 'created' => $created, 'updated' => $updated, 'deleted' => $deleted];
@@ -606,6 +671,129 @@ function zoomyt_notify_custom_sync_result(array $result): void {
 }
 
 /**
+ * Re-anchor a fixed recurring meeting at its next scheduled occurrence.
+ *
+ * Zoom silently substitutes the current time when a recurring meeting is
+ * created or updated with a start_time in the past. That changes the time of
+ * every remaining occurrence and restarts an end-after count. This helper
+ * derives the next occurrence from the original local recurrence definition
+ * and reduces end_times to the number still remaining.
+ *
+ * The returned object is only an API request clone; the activity's historical
+ * first start and total occurrence count remain unchanged in Moodle.
+ *
+ * @param stdClass $zoom Activity record.
+ * @param int|null $now Current timestamp, injectable for tests.
+ * @return stdClass|null Request clone, or null when the series has ended.
+ */
+function zoomyt_prepare_upcoming_recurring_schedule(stdClass $zoom, ?int $now = null): ?stdClass {
+    $request = clone $zoom;
+    $now = $now ?? time();
+
+    if (empty($zoom->recurring)
+        || (int) ($zoom->recurrence_type ?? 0) === ZOOM_RECURRINGTYPE_NOTIME
+        || (int) ($zoom->recurrence_type ?? 0) === ZOOM_RECURRINGTYPE_CUSTOM
+        || (int) ($zoom->start_time ?? 0) >= $now) {
+        return $request;
+    }
+
+    try {
+        $timezone = new DateTimeZone($zoom->timezone ?: date_default_timezone_get());
+    } catch (Exception $e) {
+        $timezone = new DateTimeZone(date_default_timezone_get());
+    }
+
+    $original = (new DateTimeImmutable('@' . (int) $zoom->start_time))->setTimezone($timezone);
+    $startdate = $original->setTime(0, 0);
+    $enddate = null;
+    if ((int) ($zoom->end_date_option ?? 0) === ZOOM_END_DATE_OPTION_BY
+        && !empty($zoom->end_date_time)) {
+        $enddate = (new DateTimeImmutable('@' . (int) $zoom->end_date_time))
+            ->setTimezone($timezone)
+            ->format('Y-m-d');
+    }
+
+    $interval = max(1, (int) ($zoom->repeat_interval ?? 1));
+    $weeklydays = array_filter(array_map('intval', explode(',', (string) ($zoom->weekly_days ?? ''))));
+    $total = max(1, (int) ($zoom->end_times ?? 1));
+    $sequence = 0;
+
+    // Zoom limits fixed recurring series to a small number of occurrences.
+    // Ten years is a defensive ceiling for malformed legacy records.
+    for ($dayoffset = 0; $dayoffset <= 3660; $dayoffset++) {
+        $date = $startdate->modify("+{$dayoffset} days");
+        $matches = false;
+
+        switch ((int) $zoom->recurrence_type) {
+            case ZOOM_RECURRINGTYPE_DAILY:
+                $matches = ($dayoffset % $interval) === 0;
+                break;
+
+            case ZOOM_RECURRINGTYPE_WEEKLY:
+                $weekindex = intdiv($dayoffset + (int) $startdate->format('w'), 7);
+                $zoomweekday = (int) $date->format('w') + 1; // Zoom: Sunday=1.
+                $matches = ($weekindex % $interval) === 0 && in_array($zoomweekday, $weeklydays, true);
+                break;
+
+            case ZOOM_RECURRINGTYPE_MONTHLY:
+                $monthindex = (((int) $date->format('Y') - (int) $startdate->format('Y')) * 12)
+                    + ((int) $date->format('n') - (int) $startdate->format('n'));
+                if ($monthindex < 0 || ($monthindex % $interval) !== 0) {
+                    break;
+                }
+                if ((int) ($zoom->monthly_repeat_option ?? 0) === ZOOM_MONTHLY_REPEAT_OPTION_DAY) {
+                    $targetday = min(
+                        (int) ($zoom->monthly_day ?? $original->format('j')),
+                        (int) $date->format('t')
+                    );
+                    $matches = (int) $date->format('j') === $targetday;
+                } else {
+                    $zoomweekday = (int) $date->format('w') + 1;
+                    $targetweekday = (int) ($zoom->monthly_week_day ?? 0);
+                    $targetweek = (int) ($zoom->monthly_week ?? 1);
+                    $weekofmonth = (int) ceil((int) $date->format('j') / 7);
+                    $islast = $date->modify('+7 days')->format('n') !== $date->format('n');
+                    $matches = $zoomweekday === $targetweekday
+                        && (($targetweek === -1 && $islast) || $targetweek === $weekofmonth);
+                }
+                break;
+        }
+
+        if (!$matches) {
+            continue;
+        }
+
+        $candidate = $date->setTime(
+            (int) $original->format('H'),
+            (int) $original->format('i'),
+            (int) $original->format('s')
+        );
+        if ($candidate->getTimestamp() < (int) $zoom->start_time) {
+            continue;
+        }
+        if ($enddate !== null && $candidate->format('Y-m-d') > $enddate) {
+            return null;
+        }
+
+        $sequence++;
+        if ((int) ($zoom->end_date_option ?? 0) === ZOOM_END_DATE_OPTION_AFTER && $sequence > $total) {
+            return null;
+        }
+        if ($candidate->getTimestamp() < $now) {
+            continue;
+        }
+
+        $request->start_time = $candidate->getTimestamp();
+        if ((int) ($zoom->end_date_option ?? 0) === ZOOM_END_DATE_OPTION_AFTER) {
+            $request->end_times = $total - $sequence + 1;
+        }
+        return $request;
+    }
+
+    return null;
+}
+
+/**
  * Transfer the meeting host of an activity to another user, by email.
  *
  * Upcoming Zoom session(s) are recreated under the new host's account and the
@@ -740,9 +928,15 @@ function zoomyt_transfer_host(stdClass $zoom, string $newhostemail): array {
         zoomyt_apply_custom_representative($zoom);
     } else {
         $oldmeetingid = $zoom->meeting_id;
+        $requestzoom = zoomyt_prepare_upcoming_recurring_schedule($zoom, $now);
+        if ($requestzoom === null) {
+            $zoom->host_id = $oldhostid;
+            $result['message'] = get_string('transferhost_nothingupcoming', 'zoomyt');
+            return $result;
+        }
 
         try {
-            $response = zoomyt_create_meeting_with_alt_host_retry($zoom);
+            $response = zoomyt_create_meeting_with_alt_host_retry($requestzoom);
         } catch (moodle_exception $e) {
             $zoom->host_id = $oldhostid;
             $result['errors'][] = $e->getMessage();
@@ -3355,9 +3549,18 @@ function zoomyt_rename_host_for_teacher($hostid, $moodleuser) {
  * @param array $instructoremails Array of instructor email addresses to add.
  * @param string|null $hostemail Optional host email to exclude from the list.
  * @param int|null $courseid Optional course ID for creating Zoom users.
+ * @param array|null $dropped Optional output list of instructors Zoom could not use.
  * @return string Updated comma-separated string of alternative host emails.
  */
-function zoomyt_merge_alternative_hosts($existinghosts, array $instructoremails, $hostemail = null, $courseid = null) {
+function zoomyt_merge_alternative_hosts(
+    $existinghosts,
+    array $instructoremails,
+    $hostemail = null,
+    $courseid = null,
+    ?array &$dropped = null
+) {
+    $dropped = [];
+
     // Parse existing hosts.
     $existingemails = zoomyt_get_alternative_host_array_from_string($existinghosts);
 
@@ -3385,6 +3588,7 @@ function zoomyt_merge_alternative_hosts($existinghosts, array $instructoremails,
                 $validinstructors[] = $email;
                 debugging("ZOOMYT: Validated Zoom user for alternative host: {$email}", DEBUG_DEVELOPER);
             } else {
+                $dropped[] = $email;
                 debugging("ZOOMYT: Skipping {$email} - not a valid Zoom user and could not be created.", DEBUG_DEVELOPER);
             }
         } else {
@@ -3392,6 +3596,7 @@ function zoomyt_merge_alternative_hosts($existinghosts, array $instructoremails,
             if (zoomyt_user_exists_on_zoom($email)) {
                 $validinstructors[] = $email;
             } else {
+                $dropped[] = $email;
                 debugging("ZOOMYT: Skipping {$email} - not a valid Zoom user.", DEBUG_DEVELOPER);
             }
         }
@@ -3507,21 +3712,26 @@ function zoomyt_create_meeting_with_alt_host_retry($zoom) {
  * Update a meeting on Zoom, retrying without problematic alternative hosts.
  *
  * @param stdClass $zoom The meeting object (alternative_hosts may be modified).
+ * @param bool $sendnotifications Whether Zoom may email alternative hosts.
  * @return void
  * @throws moodle_exception If the update fails for non-alt-host reasons.
  */
-function zoomyt_update_meeting_with_alt_host_retry($zoom) {
+function zoomyt_update_meeting_with_alt_host_retry($zoom, bool $sendnotifications = true) {
     global $DB;
     $service = zoomyt_webservice();
     $maxretries = 5;
+    $requestzoom = zoomyt_prepare_upcoming_recurring_schedule($zoom);
+    if ($requestzoom === null) {
+        throw new moodle_exception('transferhost_nothingupcoming', 'zoomyt');
+    }
 
     for ($attempt = 0; $attempt <= $maxretries; $attempt++) {
         try {
-            $service->update_meeting($zoom, $zoom->coursemodule);
+            $service->update_meeting($requestzoom, $zoom->coursemodule, $sendnotifications);
             return;
         } catch (moodle_exception $e) {
             $bademail = zoomyt_extract_bad_alt_host_email($e->getMessage());
-            if ($bademail === null || empty($zoom->alternative_hosts)) {
+            if ($bademail === null || empty($requestzoom->alternative_hosts)) {
                 throw $e;
             }
 
@@ -3529,10 +3739,11 @@ function zoomyt_update_meeting_with_alt_host_retry($zoom) {
                 "Removing invalid alt host {$bademail}: " . $e->getMessage(),
                 $bademail, null, $zoom->course ?? null);
 
-            $zoom->alternative_hosts = zoomyt_remove_alt_host($zoom->alternative_hosts, $bademail);
-            $DB->set_field('zoomyt', 'alternative_hosts', $zoom->alternative_hosts, ['id' => $zoom->id]);
+            $requestzoom->alternative_hosts = zoomyt_remove_alt_host($requestzoom->alternative_hosts, $bademail);
+            $zoom->alternative_hosts = $requestzoom->alternative_hosts;
+            $DB->set_field('zoomyt', 'alternative_hosts', $requestzoom->alternative_hosts, ['id' => $zoom->id]);
         }
     }
 
-    $service->update_meeting($zoom, $zoom->coursemodule);
+    $service->update_meeting($requestzoom, $zoom->coursemodule, $sendnotifications);
 }

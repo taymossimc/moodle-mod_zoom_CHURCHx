@@ -1542,6 +1542,15 @@ class mod_zoomyt_mod_form extends moodleform_mod {
             $errors['meetingcode'] = get_string('err_password_required', 'mod_zoomyt');
         }
 
+        // Zoom requires at least one meeting security mechanism. If all three
+        // are disabled, Zoom silently forces the waiting room back on and the
+        // activity no longer matches what the editor saved.
+        if (empty($data['requirepasscode'])
+            && empty($data['option_waiting_room'])
+            && empty($data['option_authenticated_users'])) {
+            $errors['option_waiting_room'] = get_string('err_meeting_security_required', 'mod_zoomyt');
+        }
+
         // Validate spoken interpretation rows from JSON. Attach errors to the visible
         // enable checkbox so they actually display (hidden fields swallow errors).
         if (!empty($data['interpretation_enable'])) {

@@ -588,6 +588,63 @@ class webservice {
     }
 
     /**
+     * Get Zoom user IDs that currently host an upcoming or in-progress session.
+     *
+     * Hosts in this set cannot safely have their paid license recycled: doing so
+     * can make a subsequent meeting PATCH fail (for example, when cloud recording
+     * is enabled) and can impose Basic-account limits on a scheduled class.
+     *
+     * @return array<string, bool> Map of Zoom user ID to true.
+     */
+    private function get_upcoming_host_ids() {
+        global $DB;
+
+        $protected = [];
+        $now = time();
+        $meetings = $DB->get_records('zoomyt', ['exists_on_zoom' => ZOOM_MEETING_EXISTS],
+            '', 'id,host_id,recurring,recurrence_type,start_time,duration');
+
+        foreach ($meetings as $meeting) {
+            if (empty($meeting->host_id)) {
+                continue;
+            }
+
+            // Custom-date activities use local occurrence rows, including legacy
+            // records whose recurring flag was not normalised when first saved.
+            $hascustomdates = ((int) ($meeting->recurrence_type ?? 0) === ZOOM_RECURRINGTYPE_CUSTOM)
+                || $DB->record_exists('zoomyt_custom_occurrences', ['zoomid' => $meeting->id]);
+            if ($hascustomdates) {
+                if ($DB->record_exists_select(
+                    'zoomyt_custom_occurrences',
+                    'zoomid = :zoomid AND (start_time + duration * 60) >= :now',
+                    ['zoomid' => $meeting->id, 'now' => $now]
+                )) {
+                    $protected[$meeting->host_id] = true;
+                }
+                continue;
+            }
+
+            if (!empty($meeting->recurring)) {
+                if ((int) ($meeting->recurrence_type ?? 0) === ZOOM_RECURRINGTYPE_NOTIME
+                    || $DB->record_exists_select(
+                        'event',
+                        'modulename = :module AND instance = :instance AND (timestart + timeduration) >= :now',
+                        ['module' => 'zoomyt', 'instance' => $meeting->id, 'now' => $now]
+                    )) {
+                    $protected[$meeting->host_id] = true;
+                }
+                continue;
+            }
+
+            if (((int) ($meeting->start_time ?? 0) + (int) ($meeting->duration ?? 0)) >= $now) {
+                $protected[$meeting->host_id] = true;
+            }
+        }
+
+        return $protected;
+    }
+
+    /**
      * Gets the ID of the paid user who has gone the longest without actually using Zoom.
      *
      * "Usage" is measured by real activity, not by account age or portal sign-ins:
@@ -618,6 +675,7 @@ class webservice {
         // Classic: user:read:admin.
         // Granular: user:read:list_users:admin.
         $userslist = $this->list_users();
+        $upcominghosts = $this->get_upcoming_host_ids();
 
         // Map of host Zoom user id => most recent actual meeting start time, taken
         // from the meeting reports the plugin has already collected locally.
@@ -648,6 +706,11 @@ class webservice {
             // Never recycle the shared fallback/service host — it must always
             // stay Pro so launch-link sessions are not capped at 40 minutes.
             if ($fallbackemail !== '' && strcasecmp($user->email ?? '', $fallbackemail) === 0) {
+                continue;
+            }
+
+            // Do not destabilise an upcoming class while licensing an instructor.
+            if (!empty($upcominghosts[$user->id])) {
                 continue;
             }
 
@@ -1091,6 +1154,9 @@ class webservice {
                 // Granular: user:update:user:admin.
                 if ($licenseisavailable) {
                     $this->make_call("users/$zoomuserid", ['type' => ZOOM_USER_TYPE_PRO], 'patch');
+                    // Later allocations in this request must see the new paid-user
+                    // count and must not recycle based on stale account data.
+                    self::$userslist = null;
                 }
             }
         } catch (\Exception $e) {
@@ -1176,18 +1242,29 @@ class webservice {
      *
      * @param stdClass $zoom The meeting to update.
      * @param ?int $cmid The cmid if available.
+     * @param bool $sendnotifications Whether Zoom may email alternative hosts.
      * @return void
      */
-    public function update_meeting($zoom, $cmid) {
+    public function update_meeting($zoom, $cmid, bool $sendnotifications = true) {
         // Classic: meeting:write:admin.
         // Granular: meeting:update:meeting:admin.
         // Classic: webinar:write:admin.
         // Granular: webinar:update:webinar:admin.
+        // Alternative-host validation may allocate licenses immediately before
+        // this call. Reassert the actual host's license before sending settings
+        // which require a paid host, such as cloud recording.
+        $this->provide_license($zoom->host_id);
+
         // Make sure the host can actually carry interpreters before we send them.
         $this->ensure_interpretation_enabled($zoom);
 
         $url = ($zoom->webinar ? 'webinars/' : 'meetings/') . $zoom->meeting_id;
-        $this->make_call($url, $this->database_to_api($zoom, $cmid), 'patch');
+        $data = $this->database_to_api($zoom, $cmid);
+        if (!$sendnotifications) {
+            $data['settings']['alternative_hosts_email_notification'] = false;
+            $data['settings']['email_notification'] = false;
+        }
+        $this->make_call($url, $data, 'patch');
     }
 
     /**
@@ -1211,6 +1288,9 @@ class webservice {
         $clone->start_time = $starttime;
         $clone->duration = $durationseconds;
 
+        // Per-session meetings have the same paid-host requirements as regular meetings.
+        $this->provide_license($clone->host_id);
+
         // Make sure the host can actually carry interpreters before we send them.
         $this->ensure_interpretation_enabled($clone);
 
@@ -1226,20 +1306,36 @@ class webservice {
      * @param int $starttime Session start, Unix timestamp.
      * @param int $durationseconds Session duration in seconds.
      * @param ?int $cmid The cmid if available.
+     * @param bool $sendnotifications Whether Zoom may email alternative hosts.
      * @return void
      */
-    public function update_scheduled_occurrence($zoom, $meetingid, int $starttime, int $durationseconds, $cmid = null) {
+    public function update_scheduled_occurrence(
+        $zoom,
+        $meetingid,
+        int $starttime,
+        int $durationseconds,
+        $cmid = null,
+        bool $sendnotifications = true
+    ) {
         $clone = clone $zoom;
         $clone->recurring = 0;
         $clone->start_time = $starttime;
         $clone->duration = $durationseconds;
         $clone->meeting_id = $meetingid;
 
+        // Reassert the host's license before pushing paid meeting features.
+        $this->provide_license($clone->host_id);
+
         // Make sure the host can actually carry interpreters before we send them.
         $this->ensure_interpretation_enabled($clone);
 
         $url = (!empty($clone->webinar) ? 'webinars/' : 'meetings/') . $meetingid;
-        $this->make_call($url, $this->database_to_api($clone, $cmid), 'patch');
+        $data = $this->database_to_api($clone, $cmid);
+        if (!$sendnotifications) {
+            $data['settings']['alternative_hosts_email_notification'] = false;
+            $data['settings']['email_notification'] = false;
+        }
+        $this->make_call($url, $data, 'patch');
     }
 
     /**

@@ -193,7 +193,15 @@ function zoomyt_add_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = null)
 
         // Merge with any existing alternative hosts (validates against Zoom, creates Basic users if needed).
         $existinghosts = $zoom->alternative_hosts ?? '';
-        $zoom->alternative_hosts = zoomyt_merge_alternative_hosts($existinghosts, $instructoremails, $hostemail, $zoom->course);
+        $droppedinstructors = [];
+        $zoom->alternative_hosts = zoomyt_merge_alternative_hosts(
+            $existinghosts,
+            $instructoremails,
+            $hostemail,
+            $zoom->course,
+            $droppedinstructors
+        );
+        zoomyt_notify_dropped_alternative_hosts($droppedinstructors);
 
         debugging("ZOOMYT: Auto-added instructors as alternative hosts: {$zoom->alternative_hosts}", DEBUG_DEVELOPER);
     }
@@ -427,7 +435,22 @@ function zoomyt_update_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = nu
 
         // Merge with any existing alternative hosts (validates against Zoom, creates Basic users if needed).
         $existinghosts = $zoom->alternative_hosts ?? $updatedzoomrecord->alternative_hosts ?? '';
-        $zoom->alternative_hosts = zoomyt_merge_alternative_hosts($existinghosts, $instructoremails, $hostemail, $zoom->course);
+        $droppedinstructors = [];
+        $zoom->alternative_hosts = zoomyt_merge_alternative_hosts(
+            $existinghosts,
+            $instructoremails,
+            $hostemail,
+            $zoom->course,
+            $droppedinstructors
+        );
+        zoomyt_notify_dropped_alternative_hosts($droppedinstructors);
+
+        $existinghostemails = zoomyt_get_alternative_host_array_from_string($existinghosts);
+        $mergedhostemails = zoomyt_get_alternative_host_array_from_string($zoom->alternative_hosts);
+        $autoaddedhosts = array_values(array_diff($mergedhostemails, $existinghostemails));
+        if (!empty($autoaddedhosts)) {
+            \core\notification::info(get_string('althosts_autoadded', 'zoomyt', implode(', ', $autoaddedhosts)));
+        }
 
         // Save the updated alternative hosts to the database so it appears in the form.
         $DB->set_field('zoomyt', 'alternative_hosts', $zoom->alternative_hosts, ['id' => $zoom->id]);
@@ -436,6 +459,7 @@ function zoomyt_update_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = nu
     }
 
     $iscustom = !empty($zoom->recurring) && ($zoom->recurrence_type ?? null) == ZOOM_RECURRINGTYPE_CUSTOM;
+    $syncerrors = false;
 
     if ($iscustom) {
         // Custom dates: reconcile one scheduled Zoom meeting per session - create
@@ -452,6 +476,7 @@ function zoomyt_update_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = nu
         }
         zoomyt_apply_custom_representative($zoom);
         zoomyt_notify_custom_sync_result($syncresult);
+        $syncerrors = !empty($syncresult['errors']);
         zoomyt_calendar_item_update($zoom);
     } else {
         // Update meeting on Zoom, retrying without problematic alt hosts if needed.
@@ -489,18 +514,21 @@ function zoomyt_update_instance(stdClass $zoom, ?mod_zoomyt_mod_form $mform = nu
 
     zoomyt_grade_item_update($zoom);
 
-    // Log the meeting update event.
-    $cm = get_coursemodule_from_instance('zoomyt', $zoom->id, $zoom->course, false, IGNORE_MISSING);
-    if ($cm) {
-        $context = context_module::instance($cm->id);
-        \mod_zoomyt\event\meeting_updated::create([
-            'context' => $context,
-            'objectid' => $zoom->id,
-            'other' => [
-                'meeting_name' => $zoom->name,
-                'meeting_id' => $zoom->meeting_id,
-            ],
-        ])->trigger();
+    // Only record a successful update when every remote session synchronized.
+    // Detailed errors have already been shown for partial custom-date failures.
+    if (!$syncerrors) {
+        $cm = get_coursemodule_from_instance('zoomyt', $zoom->id, $zoom->course, false, IGNORE_MISSING);
+        if ($cm) {
+            $context = context_module::instance($cm->id);
+            \mod_zoomyt\event\meeting_updated::create([
+                'context' => $context,
+                'objectid' => $zoom->id,
+                'other' => [
+                    'meeting_name' => $zoom->name,
+                    'meeting_id' => $zoom->meeting_id,
+                ],
+            ])->trigger();
+        }
     }
 
     return true;

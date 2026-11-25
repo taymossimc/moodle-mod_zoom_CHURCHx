@@ -975,20 +975,43 @@ class sync_recordings_to_youtube extends \core\task\scheduled_task {
             $deletethreshold = time() - ($deletedays * 86400);
 
             if ($video->timecreated < $deletethreshold) {
+                // Skip manual YouTube entries that did not originate from a Zoom recording.
+                if (empty($video->meetinguuid) || strpos((string) $video->meetinguuid, 'manual-') === 0) {
+                    $video->zoom_recording_deleted = 1;
+                    $video->timemodified = time();
+                    $DB->update_record('zoomyt_videos', $video);
+                    continue;
+                }
+
+                // Do not delete the Zoom source recording while an interpretation
+                // audio track is still pending synthesis for this video.
+                $pendingtracks = $DB->count_records_select(
+                    'zoomyt_video_audiotracks',
+                    "videoid = :videoid AND status IN ('pending', 'downloading', 'uploading')",
+                    ['videoid' => $video->id]
+                );
+                if ($pendingtracks > 0) {
+                    mtrace('  Deferring Zoom deletion for video ID ' . $video->id .
+                           ': ' . $pendingtracks . ' audio track(s) still pending.');
+                    continue;
+                }
+
                 try {
-                    // TODO: Call Zoom API to delete the recording.
-                    // For now, just mark it as deleted.
+                    $service = \mod_zoomyt\webservice::get_instance_for_course((int) $video->course);
+                    $service->delete_meeting_recordings((string) $video->meetinguuid, 'trash');
+
                     $video->zoom_recording_deleted = 1;
                     $video->timemodified = time();
                     $DB->update_record('zoomyt_videos', $video);
                     $deleted++;
-                    mtrace('  Marked recording as deleted for video ID: ' . $video->id);
+                    mtrace('  Moved Zoom cloud recording to Trash for video ID: ' . $video->id .
+                           ' (UUID: ' . $video->meetinguuid . ')');
                 } catch (\Exception $e) {
                     mtrace('  ERROR deleting recording for video ID ' . $video->id . ': ' . $e->getMessage());
                 }
             }
         }
 
-        mtrace('Marked ' . $deleted . ' Zoom recordings for deletion.');
+        mtrace('Moved ' . $deleted . ' Zoom recordings to Trash.');
     }
 }

@@ -1965,6 +1965,42 @@ class webservice {
     }
 
     /**
+     * Delete all cloud recording files for a meeting on Zoom.
+     *
+     * Uses action=trash by default so the files are moved to Zoom's Trash
+     * (freeing active cloud storage immediately while remaining recoverable
+     * in the Zoom admin portal for 30 days). Treats "not found" / 3301 / 1001
+     * as success since the recording is already gone from Zoom.
+     *
+     * @param string $meetinguuid The meeting UUID for the recorded session.
+     * @param string $action Either 'trash' (default) or 'delete' (permanent).
+     * @return bool True when deleted or already absent on Zoom.
+     * @throws moodle_exception On a non-recoverable API error.
+     */
+    public function delete_meeting_recordings(string $meetinguuid, string $action = 'trash'): bool {
+        // Classic: recording:write:admin.
+        // Granular: cloud_recording:delete:meeting_recording:admin.
+        $action = ($action === 'delete') ? 'delete' : 'trash';
+        $url = 'meetings/' . $this->encode_uuid($meetinguuid) . '/recordings?action=' . $action;
+
+        try {
+            $this->make_call($url, null, 'delete');
+            return true;
+        } catch (webservice_exception $error) {
+            // 3301 = There is no recording for this meeting; 1001 = Meeting does not exist.
+            $code = (int) ($error->zoomerrorcode ?? 0);
+            $msg = $error->getMessage();
+            if (in_array($code, [3301, 1001, 3001], true)
+                || stripos($msg, 'no recording for this meeting') !== false
+                || stripos($msg, 'does not exist') !== false
+                || stripos($msg, 'not found') !== false) {
+                return true;
+            }
+            throw $error;
+        }
+    }
+
+    /**
      * Returns whether or not the current user is permitted to create a meeting/webinar that requires registration.
      * @return boolean
      */
